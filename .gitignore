@@ -1,0 +1,27 @@
+# Dependencies and generated output
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Local tooling and operating system files
+.DS_Store
+Thumbs.db
+*.log
+.vercel/
+.idea/
+.vscode/
+
+# Media authoring stays outside this repository
+promo/
+*.mp4
+*.webm
+*.wav
+*.mp3

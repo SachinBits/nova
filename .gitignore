@@ -25,3 +25,4 @@ promo/
 *.webm
 *.wav
 *.mp3
+.data/

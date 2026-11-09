@@ -24,7 +24,7 @@ Hex's central idea is that the conversation can carry that chain. Each agent con
 - **Containment:** requests human approval for disruptive actions.
 - **Director:** explains the exchange and tracks confirmed outcomes.
 
-The intended execution architecture uses FastAPI, an in-process async event bus, WebSocket streaming, an isolated target service, and SQLite history. Groq provides reasoning and fast classification through one client with bounded retries and explicit fallback behavior. Runtime mitigation flags make before/after validation possible without restarting the target. Confirmed metrics would derive from actual events and timestamps.
+The local execution architecture uses Next.js, a server scheduler, a private synthetic target, and SQLite history. OpenAI selects scoped probes and runtime policies when configured. Jev adds an advisory triage signal. Runtime policies are evaluated through before-and-after evidence.
 
 ## Why the experience is different
 
@@ -36,7 +36,7 @@ The initial audience is security education, controlled exercises, and teams expl
 
 ## Submission implementation
 
-The submitted Next.js application demonstrates this interaction model with a browser-driven timeline, agent/squad views, approval flow, scoreboard, findings view, responsive themes and optional Groq-backed Director replies. It is the product's interactive interface milestone. The full execution architecture above is the planned platform; real attack execution, monitoring and patch deployment are not implemented in this packet.
+The implemented exercise runs SQL injection, order ownership, and an instruction-following fixture against synthetic data. It records measured findings and validates mitigations through attack replays and legitimate controls.
 
 ## One-line pitch
 

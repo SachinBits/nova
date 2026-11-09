@@ -13,7 +13,7 @@ export default function NotFound() {
       <div style={{ textAlign: 'center' }}>
         <h1>404</h1>
         <p>This Hex thread does not exist.</p>
-        <Link href="/">Return to the arena</Link>
+        <Link href="/">Return to Hex</Link>
       </div>
     </main>
   );

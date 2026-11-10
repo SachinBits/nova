@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { ProjectBattle } from '../../components/project-battle';
+import { ProjectBattle, projectRoles } from '../../components/project-battle';
+import { downloadArchive } from '../../components/project-review-results';
 import { useProjectReview } from '../../components/project-review-session';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { agents, type Squad } from '../../lib/agents';
@@ -14,6 +15,7 @@ import {
   Check,
   ChevronLeft,
   CircleStop,
+  Download,
   Clock3,
   FileCode2,
   ListFilter,
@@ -32,6 +34,28 @@ export default function WarRoom() {
   const [active, setActive] = useState('War room');
   const [tab, setTab] = useState<'feed' | 'score' | 'findings' | 'project'>(project ? 'project' : 'feed');
   const [input, setInput] = useState('');
+  const [focus, setFocus] = useState(0);
+  const inProject = tab === 'project' && !!project;
+  const projectAgents = useMemo(() => {
+    const seen = new Map<string, { squad: Squad; count: number }>();
+    for (const update of project?.updates ?? []) {
+      const entry = seen.get(update.agent);
+      if (entry) entry.count += 1;
+      else seen.set(update.agent, { squad: update.squad, count: 1 });
+    }
+    return [...seen].map(([name, value]) => ({ name, ...value }));
+  }, [project?.updates]);
+  // Sidebar choices filter whichever view is open. In the lab they also open the feed they filter.
+  function pick(name: string) {
+    setActive(name);
+    setFocus((count) => count + 1);
+    setMobileOpen(false);
+    if (!inProject) setTab('feed');
+  }
+  function switchTab(next: 'feed' | 'score' | 'findings' | 'project') {
+    if ((next === 'project') !== (tab === 'project')) setActive('War room');
+    setTab(next);
+  }
   const [mobileOpen, setMobileOpen] = useState(false);
   const {
     messages,
@@ -53,6 +77,19 @@ export default function WarRoom() {
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   }, [dark]);
+
+  // The landing page opens /war-room?start=1 to begin a lab run straight away.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('start') === '1' && !project) {
+      autoStarted.current = true;
+      window.history.replaceState(null, '', '/war-room');
+      void setRunning(true);
+    }
+    // setRunning is recreated each render; the ref guard keeps this to a single run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Follow the conversation only when the reader is already near its end.
   useEffect(() => {
@@ -119,56 +156,62 @@ export default function WarRoom() {
           <button
             key={n}
             className={`thread ${active === n ? 'selected' : ''}`}
-            onClick={() => {
-              setActive(n);
-              setMobileOpen(false);
-            }}
+            onClick={() => pick(n)}
           >
             {n === 'War room' ? (
               <Avatar name="Director" squad="neutral" />
+            ) : inProject ? (
+              <Avatar name={n === 'Red squad' ? 'Scout' : 'Patch Engineer'} squad={s as 'red' | 'blue'} />
             ) : (
               <Stacked squad={s as 'red' | 'blue'} />
             )}
             <span>
               <b>{n}</b>
               <small>
-                {n === 'War room'
-                  ? 'All agent activity'
-                  : n === 'Red squad'
-                    ? 'Offensive operators'
-                    : 'Defensive operators'}
+                {inProject
+                  ? n === 'War room' ? 'Every agent' : n === 'Red squad' ? 'Finds the flaws' : 'Fixes them'
+                  : n === 'War room'
+                    ? 'All agent activity'
+                    : n === 'Red squad'
+                      ? 'Offensive operators'
+                      : 'Defensive operators'}
               </small>
             </span>
-            {n === 'War room' && running && <i />}
+            {n === 'War room' && running && !inProject && <i />}
           </button>
         ))}
-        <div className="section">AGENTS</div>
-        {agents
-          .filter((a) => a[0] !== 'Director')
-          .map(([n, s]) => (
-            <button
-              key={n}
-              className={`thread agentrow ${active === n ? 'selected' : ''}`}
-              onClick={() => {
-                setActive(n);
-                setMobileOpen(false);
-              }}
-            >
-              <Avatar name={n} squad={s} />
-              <span>
-                <b>{n}</b>
-                <small>{s === 'red' ? 'Red squad' : 'Blue squad'}</small>
-              </span>
-              <em className={typing === n ? 'online' : ''} />
-            </button>
-          ))}
+        <div className="section">{inProject ? 'AGENTS IN THIS REVIEW' : 'AGENTS'}</div>
+        {inProject
+          ? projectAgents.map(({ name, squad, count }) => (
+              <button key={name} className={`thread agentrow ${active === name ? 'selected' : ''}`} onClick={() => pick(name)}>
+                <Avatar name={name} squad={squad} />
+                <span>
+                  <b>{name}</b>
+                  <small>{projectRoles[name] ?? squad}</small>
+                </span>
+                <em className="count">{count}</em>
+              </button>
+            ))
+          : agents
+              .filter((a) => a[0] !== 'Director')
+              .map(([n, s]) => (
+                <button key={n} className={`thread agentrow ${active === n ? 'selected' : ''}`} onClick={() => pick(n)}>
+                  <Avatar name={n} squad={s} />
+                  <span>
+                    <b>{n}</b>
+                    <small>{s === 'red' ? 'Red squad' : 'Blue squad'}</small>
+                  </span>
+                  <em className={typing === n ? 'online' : ''} />
+                </button>
+              ))}
         <div className="runs">
-          <div className="section">RECENT RUNS</div>
+          <div className="section">RECENT LAB RUNS</div>
           {runs.length === 0 && <small>No runs yet</small>}
           {runs.slice(0, 5).map((entry) => (
             <button key={entry.id} disabled={busy} onClick={() => {
               setSelectedFinding(null);
               setActive('War room');
+              setTab('feed');
               setMobileOpen(false);
               void open(entry.id);
             }}>
@@ -190,51 +233,61 @@ export default function WarRoom() {
             <Logo compact />
           </button>
           <div>
-            <h1>{active}</h1>
+            <h1>{inProject ? 'Project review' : active}</h1>
             <p>
-              {active === 'War room'
-                ? (run?.agentWork ? 'OpenAI agent mode · Synthetic commerce lab' : 'Synthetic commerce lab')
-                : active.includes('squad')
-                  ? 'Squad channel'
-                  : `${active} · Agent thread`}
+              {inProject
+                ? project?.filename
+                : active === 'War room'
+                  ? (run?.agentWork ? 'OpenAI agent mode · Practice lab with a synthetic store' : 'Practice lab with a synthetic store')
+                  : active.includes('squad')
+                    ? 'Squad channel · Practice lab'
+                    : `${active} · Agent thread`}
             </p>
           </div>
           <div className="headActions">
-            <button className="icon" onClick={() => setDark(!dark)}>
+            <button className="icon" aria-label="Toggle theme" onClick={() => setDark(!dark)}>
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            {running ? (
-              <button className="stop" disabled={busy} onClick={() => setRunning(false)}>
-                <CircleStop size={15} /> Pause
+            {inProject ? (
+              <button className="start" disabled={!project?.review} onClick={() => downloadArchive(project!.review!.archive, project!.review!.filename)}>
+                <Download size={14} /> Download fixed project
               </button>
             ) : (
-              <button className="start" disabled={busy || run?.phase === 'approval'} onClick={() => { setTab('feed'); void setRunning(true); }}>
-                <Play size={14} fill="currentColor" /> {run?.phase === 'paused' ? 'Resume' : run?.phase === 'approval' ? 'Awaiting approval' : 'Start run'}
-              </button>
+              <>
+              {running ? (
+                <button className="stop" disabled={busy} onClick={() => setRunning(false)}>
+                  <CircleStop size={15} /> Pause
+                </button>
+              ) : (
+                <button className="start" disabled={busy || run?.phase === 'approval'} onClick={() => { setTab('feed'); void setRunning(true); }}>
+                  <Play size={14} fill="currentColor" /> {run?.phase === 'paused' ? 'Resume' : run?.phase === 'approval' ? 'Awaiting approval' : 'Start run'}
+                </button>
+              )}
+              </>
             )}
           </div>
         </header>
         {error && <p className="arena-error" role="alert">{error}</p>}
         <nav className="tabs">
-          <button className={tab === 'feed' ? 'on' : ''} onClick={() => setTab('feed')}>
+          {project && (
+            <>
+              <button className={tab === 'project' ? 'on' : ''} onClick={() => switchTab('project')}>
+                <FileCode2 size={14} /> Your project
+              </button>
+              <em className="tabsLabel">Practice lab</em>
+            </>
+          )}
+          <button className={tab === 'feed' ? 'on' : ''} onClick={() => switchTab('feed')}>
             <Activity size={14} /> Live feed
           </button>
-          <button className={tab === 'score' ? 'on' : ''} onClick={() => setTab('score')}>
+          <button className={tab === 'score' ? 'on' : ''} onClick={() => switchTab('score')}>
             <Sparkles size={14} /> Scoreboard
           </button>
-          <button
-            className={tab === 'findings' ? 'on' : ''}
-            onClick={() => setTab('findings')}
-          >
+          <button className={tab === 'findings' ? 'on' : ''} onClick={() => switchTab('findings')}>
             <ListFilter size={14} /> Findings <span>{findings.length}</span>
           </button>
-          {project && (
-            <button className={tab === 'project' ? 'on' : ''} onClick={() => setTab('project')}>
-              <FileCode2 size={14} /> Project battle
-            </button>
-          )}
         </nav>
-        {tab === 'project' && project && <ProjectBattle />}
+        {tab === 'project' && project && <ProjectBattle filter={active} focus={focus} clearFilter={() => setActive('War room')} />}
         {tab === 'feed' && (
           <>
             <div
@@ -378,7 +431,7 @@ function Score({
   stats,
   phase,
 }: {
-  stats: { attacks: number; caught: number; patched: number; detectMs: number | null; patchMs: number | null };
+  stats: { attacks: number; caught: number; patched: number; detectMs: number | null; patchMs: number | null; waitingMs: number | null; aiCalls: number };
   phase?: LabRun['phase'];
 }) {
   return (
@@ -409,7 +462,7 @@ function Score({
       <div className="metricGrid">
         <Metric
           icon={<Activity />}
-          label="Attacks attempted"
+          label="Attack attempts"
           value={String(stats.attacks)}
         />
         <Metric
@@ -426,6 +479,16 @@ function Score({
           icon={<Clock3 />}
           label="Mean patch"
           value={stats.patchMs === null ? '—' : (stats.patchMs / 1000).toFixed(2) + ' s'}
+        />
+        <Metric
+          icon={<Sparkles />}
+          label="AI calls this run"
+          value={String(stats.aiCalls)}
+        />
+        <Metric
+          icon={<Clock3 />}
+          label="Waiting on you"
+          value={stats.waitingMs === null ? '—' : (stats.waitingMs / 1000).toFixed(1) + ' s'}
         />
       </div>
       <div className="coverage">
@@ -467,6 +530,7 @@ function Findings({
   detail?: Finding;
   select: (id: Finding['id'] | null) => void;
 }) {
+  const showJev = findings.some((finding) => finding.escalation !== undefined);
   return (
     <div className="panel">
       <div className="panelTitle">
@@ -488,13 +552,15 @@ function Findings({
       ) : (
         <div className="table">
           {findings.map((finding) => (
-            <div className="finding" key={finding.id}>
+            <div className={'finding' + (showJev ? '' : ' nojev')} key={finding.id}>
               <span className={'sev ' + finding.severity.toLowerCase()}>{finding.severity}</span>
               <div><b>{finding.title}</b><small>Found by {finding.agent}</small></div>
-              <div>
-                <small>JEV ESCALATION</small>
-                <span>{finding.escalation === undefined ? '—' : Math.round(finding.escalation * 100) + '%'}</span>
-              </div>
+              {showJev && (
+                <div>
+                  <small>JEV ESCALATION</small>
+                  <span>{finding.escalation === undefined ? '—' : Math.round(finding.escalation * 100) + '%'}</span>
+                </div>
+              )}
               <span className={'state ' + (finding.state === 'Verified' ? 'blocked' : 'open')}>
                 {finding.state === 'Verified' && <Check size={12} />}
                 {finding.state}
@@ -508,6 +574,21 @@ function Findings({
       {detail && (
         <section className="proof" aria-label="Mitigation evidence">
           <h3>{detail.title}</h3>
+          {detail.attacks && detail.attacks.length > 0 && (
+            <div className="attackLog">
+              <b>Red team attempts</b>
+              <ol>
+                {detail.attacks.map((attack, index) => (
+                  <li key={index} className={attack.outcome}>
+                    <span className="tag">{attack.kind === 'attempt' ? 'Attempt' : 'Re-attack'}</span>
+                    <code>{attack.payload}</code>
+                    <small>{attack.source}</small>
+                    <em>{attack.outcome === 'leaked' ? 'leaked ' + attack.rows + ' row(s): ' + attack.names.join(', ') : 'blocked · HTTP ' + attack.status}</em>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
           {detail.verification && detail.verification.length > 1 && (
             <ul>{detail.verification.map((candidate) => (
               <li key={candidate.policy}>{candidate.policy === 'quarantine' ? 'Route quarantine' : 'Scoped fix'} · {candidate.passed ? 'Verified' : 'Rolled back'} · Legitimate request returned {candidate.control.status}</li>

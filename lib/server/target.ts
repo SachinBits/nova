@@ -3,6 +3,12 @@ import type { Evidence, ProbeId } from '../lab-types';
 
 const secret = 'HEX_LAB_REFUND_CODE';
 const tenant = 'alice';
+// Reject statements that could persist, reach the filesystem, or hang the synchronous query.
+const forbidden = /attach|pragma|load_extension|vacuum|detach|recursive|randomblob|zeroblob/i;
+
+export function validPayload(input: string) {
+  return input.length <= 200 && /^[\x20-\x7e]+$/.test(input) && !forbidden.test(input);
+}
 
 const probes = {
   sql: {
@@ -36,10 +42,15 @@ function handle(route: string, input: string, hardened: boolean) {
       INSERT INTO orders VALUES ('A-100', 'alice'), ('B-200', 'bob');
     `);
     if (route === '/customers') {
-      const rows = hardened
-        ? db.prepare('SELECT name, order_id FROM customers WHERE name = ?').all(input)
-        : db.prepare("SELECT name, order_id FROM customers WHERE name = '" + input + "'").all();
-      return { status: 200, response: { rows } };
+      try {
+        const rows = hardened
+          ? db.prepare('SELECT name, order_id FROM customers WHERE name = ?').all(input)
+          : db.prepare("SELECT name, order_id FROM customers WHERE name = '" + input + "'").all();
+        return { status: 200, response: { rows: rows.slice(0, 20) } };
+      } catch {
+        // A crafted payload that is not valid SQL is simply a failed attempt, not a lab error.
+        return { status: 500, response: { error: 'Query failed' } };
+      }
     }
     const order = db.prepare('SELECT id, owner FROM orders WHERE id = ?').get(input);
     if (!order || (hardened && order.owner !== tenant)) {
@@ -51,7 +62,7 @@ function handle(route: string, input: string, hardened: boolean) {
   }
 }
 
-export function probe(id: ProbeId, hardened: boolean, control = false, discoveredOrder?: string, quarantine = false, variant?: 'alternate'): Evidence {
+export function probe(id: ProbeId, hardened: boolean, control = false, discoveredOrder?: string, quarantine = false, variant?: 'alternate', custom?: string): Evidence {
   const { route, input: defaultInput } = control ? probes[id].control : probes[id].attack;
   const alternate = {
     sql: "' UNION SELECT name, order_id FROM customers WHERE name = 'bob' --",
@@ -61,6 +72,10 @@ export function probe(id: ProbeId, hardened: boolean, control = false, discovere
   let input = defaultInput;
   if (!control && id === 'ownership') input = discoveredOrder ?? defaultInput;
   if (!control && variant === 'alternate') input = alternate[id];
+  if (!control && id === 'sql' && custom !== undefined) {
+    if (!validPayload(custom)) return { request: route + ' · ' + custom, status: 400, response: { error: 'Payload rejected' }, elapsedMs: 0 };
+    input = custom;
+  }
   const started = performance.now();
   const result = quarantine
     ? { status: 503, response: { error: 'Route quarantined' } }
@@ -78,8 +93,9 @@ export function leakedOrder(evidence?: Evidence) {
 }
 
 export function exposed(id: ProbeId, evidence: Evidence) {
-  const body = evidence.response as { rows?: { name: string }[]; order?: { owner: string }; answer?: string };
-  if (id === 'sql') return body.rows?.some((row) => row.name === 'bob') === true;
+  const body = evidence.response as { rows?: { name: string; order_id?: string }[]; order?: { owner: string }; answer?: string };
+  // Require bob's real row so a crafted result set cannot fake a leak with constant columns.
+  if (id === 'sql') return body.rows?.some((row) => row.name === 'bob' && row.order_id === 'B-200') === true;
   if (id === 'ownership') return body.order?.owner === 'bob';
   return body.answer?.includes(secret) === true;
 }

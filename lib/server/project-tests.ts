@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { promisify } from 'node:util';
+import type { TestResult } from '../project-review';
 
 const exec = promisify(execFile);
 const image = 'node:24-bookworm-slim';
@@ -16,7 +17,7 @@ function check(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) check(path);
-    else if (/\\.(?:[cm]?[jt]s)$/.test(path)) {
+    else if (/\\.[cm]?js$/.test(path)) {
       const result = spawnSync(process.execPath, ['--check', path], { stdio: 'ignore', timeout: 3000 });
       if (result.status !== 0) { console.log('HEX_SYNTAX_FAILED'); process.exit(2); }
       count++;
@@ -40,7 +41,16 @@ export async function dockerReady() {
   }
 }
 
-export async function isolatedTests(files: Map<string, Buffer>, manifest: string | undefined, imageId: string) {
+// The TAP summary prints last, so the final match cannot be spoofed by earlier test output.
+function tapCount(stdout: string, label: 'pass' | 'fail') {
+  return Number([...stdout.matchAll(new RegExp('^# ' + label + ' (\\d+)\\s*$', 'gm'))].at(-1)?.[1] ?? 0);
+}
+
+function syntaxCount(stdout: string) {
+  return Number(stdout.match(/^HEX_SYNTAX_CHECKED=(\d+)$/m)?.[1] ?? 0);
+}
+
+export async function isolatedTests(files: Map<string, Buffer>, manifest: string | undefined, imageId: string): Promise<TestResult> {
   const root = manifest ? posix.dirname(manifest) : '.';
   const prefix = root === '.' ? '' : root + '/';
   const hasTests = [...files.keys()].some((path) => path.startsWith(prefix)
@@ -63,14 +73,20 @@ export async function isolatedTests(files: Map<string, Buffer>, manifest: string
       '--workdir', '/review/' + prefix, '--entrypoint=node', imageId,
       '-e', runner, '--', hasTests ? 'tests' : 'syntax-only',
     ], { timeout: 45000, maxBuffer: 128 * 1024, windowsHide: true });
-    const syntax = Number(stdout.match(/^HEX_SYNTAX_CHECKED=(\d+)$/m)?.[1] ?? 0);
-    const count = Number(stdout.match(/^# pass (\d+)\s*$/m)?.[1] ?? 0);
-    return 'Docker syntax checks passed for ' + syntax + ' file(s). '
-      + (count ? count + ' Node test(s) completed.' : 'No compatible Node tests ran.');
+    const jsChecked = syntaxCount(stdout);
+    const pass = tapCount(stdout, 'pass');
+    return {
+      syntaxOk: true, jsChecked, pass, fail: tapCount(stdout, 'fail'),
+      summary: 'Docker syntax checks passed for ' + jsChecked + ' JS file(s). '
+        + (pass ? pass + ' Node test(s) completed.' : 'No compatible Node tests ran.'),
+    };
   } catch (error) {
     const stdout = (error as { stdout?: string }).stdout ?? '';
-    if (stdout.includes('HEX_SYNTAX_FAILED')) return 'Failed. Node reported a syntax error in the Docker check.';
-    if (stdout.includes('HEX_SYNTAX_CHECKED=')) return 'Docker syntax checks passed. Project tests failed or exceeded the sandbox limits.';
+    if (stdout.includes('HEX_SYNTAX_FAILED')) return { syntaxOk: false, jsChecked: 0, pass: 0, fail: 0, summary: 'Failed. Node reported a syntax error in the Docker check.' };
+    if (stdout.includes('HEX_SYNTAX_CHECKED=')) return {
+      syntaxOk: true, jsChecked: syntaxCount(stdout), pass: tapCount(stdout, 'pass'), fail: tapCount(stdout, 'fail'),
+      summary: 'Docker syntax checks passed. Project tests failed or exceeded the sandbox limits.',
+    };
     throw new Error('Docker could not finish verification. Check the Docker engine and local image.');
   } finally {
     await exec('docker', ['rm', '-f', name], { timeout: 5000, windowsHide: true }).catch(() => {});

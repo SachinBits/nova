@@ -59,9 +59,15 @@ assert.equal((await api({ id })).run.step, paused.step);
 await api({ id, action: 'resume' });
 
 const approval = await waitForApproval(id);
-assert.equal(approval.attempts, 3);
+// 1 SQL attempt (first payload leaks) + ownership + prompt + 2 SQL re-attacks after the fix.
+assert.equal(approval.attempts, 5);
 assert.equal(approval.findings.length, 3);
 assert.equal(approval.findings.filter((item) => item.state === 'Verified').length, 2);
+const sqlFinding = approval.findings.find((item) => item.id === 'sql');
+assert.equal(sqlFinding.state, 'Verified');
+assert.equal(sqlFinding.attacks.filter((a) => a.kind === 'reattack').length, 2);
+assert.ok(sqlFinding.attacks.every((a) => a.source === 'Local'));
+assert.ok(approval.messages.some((m) => m.text === 'Red re-attacked with 2 new payloads: all blocked.'));
 assert.match(approval.messages.find((message) => message.agent === 'IDOR Runner').text, /discovered by Injector/);
 const { run: approved } = await api({ id, action: 'approve' });
 assert.equal(approved.phase, 'complete');

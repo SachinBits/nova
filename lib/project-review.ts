@@ -12,7 +12,12 @@ export type ReviewFinding = {
   title: string;
   detail: string;
   status: 'Patched' | 'Review';
+  severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  cwe: string;
+  verification?: 'test-verified' | 'syntax-checked in Docker (no tests)' | 'syntax-checked in Docker (no passing tests)';
 };
+export type TestResult = { syntaxOk: boolean; jsChecked: number; pass: number; fail: number; summary: string };
+export const testCounts = ({ pass, fail }: TestResult) => pass + ' passed, ' + fail + ' failed';
 export type ProjectReport = {
   framework: string;
   scannedFiles: number;
@@ -21,5 +26,7 @@ export type ProjectReport = {
   checks: string[];
   changes: { file: string; line: number; before: string; after: string }[];
   ai: string;
-  tests: { baseline: string; patched: string };
+  tests: { baseline: TestResult; patched: TestResult };
+  kept: 'Deterministic + AI' | 'AI only' | 'Deterministic only' | 'None';
+  tsChecked: number;
 };

@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "check": "tsc --noEmit",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "sample": "node scripts/pack-sample.mjs"
   },
   "dependencies": {
     "@types/node": "latest",
@@ -21,7 +22,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.2",
-    "yauzl": "3.2.0",
+    "yauzl": "3.4.0",
     "yazl": "3.3.1"
   },
   "devDependencies": {

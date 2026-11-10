@@ -7,6 +7,16 @@ export type Evidence = {
   response: unknown;
   elapsedMs: number;
 };
+export type Attack = {
+  kind: 'attempt' | 'reattack';
+  payload: string;
+  rationale: string;
+  source: 'OpenAI' | 'Local';
+  status: number;
+  rows: number;
+  names: string[];
+  outcome: 'leaked' | 'blocked';
+};
 export type Finding = {
   id: ProbeId;
   title: string;
@@ -16,6 +26,8 @@ export type Finding = {
   state: 'Open' | 'Verified' | 'Rolled back';
   before: Evidence;
   variant?: 'alternate';
+  payload?: string;
+  attacks?: Attack[];
   replay?: Evidence;
   control?: Evidence;
   verifiedAt?: number;
@@ -24,7 +36,11 @@ export type Finding = {
 };
 export type AgentDecision = { action: string; reason: string; agent: string; time: string };
 export type LabRun = {
-  agentWork?: { stage: 'red' | 'blue'; decisions: AgentDecision[] };
+  agentWork?: { stage: 'red' | 'blue'; decisions: AgentDecision[]; craft?: 'attempt' | 'reattack' };
+  sqlAttempts?: Attack[];
+  aiCalls?: number;
+  approvalRequestedAt?: number;
+  approvalAnsweredAt?: number;
   id: string;
   createdAt: number;
   phase: 'running' | 'paused' | 'approval' | 'complete' | 'failed';

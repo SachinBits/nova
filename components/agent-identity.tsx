@@ -7,6 +7,7 @@ import {
   MessageSquareWarning,
   Radar,
   ScanSearch,
+  ShieldCheck,
   Sparkles,
   Wrench,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const glyphs: Record<string, React.ElementType> = {
   Triage: GitMerge,
   Containment: LockKeyhole,
   Director: Sparkles,
+  Verifier: ShieldCheck,
   You: Sparkles,
 };
 export function Avatar({

@@ -73,7 +73,13 @@ export function useArena() {
 
   const findings = run?.findings ?? [];
   const patched = findings.filter((item) => item.state === 'Verified');
-  const patchTimes = patched.map((item) => (item.verifiedAt ?? item.openedAt) - item.openedAt);
+  // Exclude the operator's approval wait so "Mean patch" measures the agents, not the human.
+  const approvalWait = run?.approvalRequestedAt && run.approvalAnsweredAt
+    ? run.approvalAnsweredAt - run.approvalRequestedAt : 0;
+  const patchTimes = patched.map((item) => {
+    const elapsed = (item.verifiedAt ?? item.openedAt) - item.openedAt;
+    return item.id === 'ownership' ? Math.max(0, elapsed - approvalWait) : elapsed;
+  });
   function mean(values: number[]) {
     return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   }
@@ -93,6 +99,8 @@ export function useArena() {
       patched: patched.length,
       detectMs: mean(run?.detectMs ?? []),
       patchMs: mean(patchTimes),
+      waitingMs: approvalWait || (run?.approvalRequestedAt && !run.approvalAnsweredAt ? Date.now() - run.approvalRequestedAt : null),
+      aiCalls: run?.aiCalls ?? 0,
     },
     reset: () => act('start'),
     open: (selected: string) => act('open', undefined, selected),

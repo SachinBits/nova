@@ -83,7 +83,7 @@ export function ProjectBattle({ filter, focus, clearFilter }: { filter: string; 
         <div>
           <span className="eyebrow">PROJECT REVIEW</span>
           <h2>{project.filename}</h2>
-          <p>Red agents look for security flaws, Blue agents fix them, and a referee runs the project’s own tests in a locked-down Docker sandbox to prove each fix works.</p>
+          <p>A broad security review. JavaScript, TypeScript and Python are fixed and verified in a locked-down Docker sandbox; other languages are flagged. Red agents look for security flaws, Blue agents fix what they safely can, and a referee proves each fix.</p>
         </div>
         <span className={'pr-status ' + status.toLowerCase()}>{!done && !project.error && <i />}{status}</span>
       </div>
@@ -102,7 +102,7 @@ export function ProjectBattle({ filter, focus, clearFilter }: { filter: string; 
       </ol>
 
       {project.error && <div className="pr-error" role="alert"><b>The review stopped.</b> {project.error}</div>}
-      {project.review && <div ref={results} style={{ scrollMarginTop: 16 }}><ProjectReviewResults review={project.review} /></div>}
+      {project.review && <div ref={results} style={{ scrollMarginTop: 16 }}><ProjectReviewResults review={project.review} updates={project.updates} /></div>}
 
       <div className="pr-log" ref={log}>
         <button className="pr-logToggle" aria-expanded={logOpen} onClick={() => setLogChoice(!logOpen)}>

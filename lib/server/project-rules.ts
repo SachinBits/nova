@@ -1,7 +1,9 @@
 import ts from 'typescript';
 import type { ProjectReport, ReviewFinding } from '../project-review';
 
-const sourceName = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
+export const sourceName = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
+// Languages the AI reviewer accepts. The deterministic AST scanner and auto-fix stay JS/TS only.
+export const reviewable = /\.(?:[cm]?[jt]s|[jt]sx|py|rb|go|php|java)$/i;
 const isNextConfig = /(^|\/)next\.config\.(?:[cm]?[jt]s)$/;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -251,24 +253,27 @@ export function reviewSources(files: Map<string, Buffer>) {
   let scannedFiles = 0;
   let aiChars = 0;
   for (const [path, bytes] of files) {
-    if (!sourceName.test(path) || bytes.length > 384 * 1024) continue;
+    if (!reviewable.test(path) || bytes.length > 384 * 1024) continue;
     let source: string;
     try { source = textDecoder.decode(bytes); } catch { continue; }
-    const result = inspect(path, source, true);
     scannedFiles++;
-    if (result.patched !== source) {
-      if (!parses(path, result.patched)) {
-        for (const finding of result.findings.filter(({ status }) => status === 'Patched')) {
-          finding.status = 'Review';
-          finding.detail = 'Candidate skipped because its syntax check reported an error.';
+    // The AST scanner and auto-fix only understand JS/TS; other languages are AI-review only.
+    if (sourceName.test(path)) {
+      const result = inspect(path, source, true);
+      if (result.patched !== source) {
+        if (!parses(path, result.patched)) {
+          for (const finding of result.findings.filter(({ status }) => status === 'Patched')) {
+            finding.status = 'Review';
+            finding.detail = 'Candidate skipped because its syntax check reported an error.';
+          }
+        } else {
+          patched.set(path, Buffer.from(result.patched));
+          changes.push(...result.changes);
+          checks.push(path + ' passed the post-edit syntax check.');
         }
-      } else {
-        patched.set(path, Buffer.from(result.patched));
-        changes.push(...result.changes);
-        checks.push(path + ' passed the post-edit syntax check.');
       }
+      findings.push(...result.findings);
     }
-    findings.push(...result.findings);
     if (aiSources.length < 8 && source.length <= 7000 && aiChars + source.length <= 24000
         && !/\b(?:sk-[\w-]{16,}|AKIA[A-Z0-9]{16}|gh[pousr]_[\w]{20,}|BEGIN [A-Z ]*PRIVATE KEY)\b/.test(source)) {
       aiSources.push({ file: path, source });
@@ -289,5 +294,10 @@ export function identifyProject(files: Map<string, Buffer>) {
       // A malformed manifest is not a project root.
     }
   }
+  const names = [...files.keys()];
+  const pythonMarker = names.some((name) => /(^|\/)(requirements\.txt|pyproject\.toml|setup\.py|Pipfile)$/.test(name));
+  const py = names.filter((name) => /\.py$/i.test(name)).length;
+  const code = names.filter((name) => reviewable.test(name)).length;
+  if (pythonMarker || (code > 0 && py * 2 > code)) return { framework: 'Python', path: undefined };
   return { framework: 'JavaScript / TypeScript sources', path: undefined };
 }

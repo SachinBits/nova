@@ -83,7 +83,7 @@ export default function Landing() {
           <section className="landing-card" aria-labelledby="review-heading">
             <div className="landing-cardIcon red"><FileCode2 size={18} /></div>
             <h2 id="review-heading">Review your project</h2>
-            <p>Upload a JavaScript or TypeScript project ZIP and follow Red and Blue as they work.</p>
+            <p>Upload a project ZIP for a broad security review, and follow Red and Blue as they work. JavaScript, TypeScript and Python are fixed and verified; other languages are flagged.</p>
             <form onSubmit={review} aria-busy={busy}>
               <fieldset disabled={busy}>
                 <label htmlFor="project-zip">Project ZIP</label>

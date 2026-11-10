@@ -14,7 +14,7 @@ export type ReviewFinding = {
   status: 'Patched' | 'Review';
   severity: 'Critical' | 'High' | 'Medium' | 'Low';
   cwe: string;
-  verification?: 'test-verified' | 'syntax-checked in Docker (no tests)' | 'syntax-checked in Docker (no passing tests)';
+  verification?: 'test-verified' | 'syntax-checked in Docker (no tests)' | 'syntax-checked in Docker (no passing tests)' | 'proven by generated exploit test';
 };
 export type TestResult = { syntaxOk: boolean; jsChecked: number; pass: number; fail: number; summary: string };
 export const testCounts = ({ pass, fail }: TestResult) => pass + ' passed, ' + fail + ' failed';
@@ -29,4 +29,5 @@ export type ProjectReport = {
   tests: { baseline: TestResult; patched: TestResult };
   kept: 'Deterministic + AI' | 'AI only' | 'Deterministic only' | 'None';
   tsChecked: number;
+  aiCalls?: number;
 };

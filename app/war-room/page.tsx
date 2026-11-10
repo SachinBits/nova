@@ -258,9 +258,16 @@ export default function WarRoom() {
                 <button className="stop" disabled={busy} onClick={() => setRunning(false)}>
                   <CircleStop size={15} /> Pause
                 </button>
+              ) : run?.phase === 'approval' ? (
+                <button className="start" onClick={() => {
+                  setTab('feed');
+                  requestAnimationFrame(() => document.getElementById('approval-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+                }}>
+                  <AlertTriangle size={14} /> Review approval
+                </button>
               ) : (
-                <button className="start" disabled={busy || run?.phase === 'approval'} onClick={() => { setTab('feed'); void setRunning(true); }}>
-                  <Play size={14} fill="currentColor" /> {run?.phase === 'paused' ? 'Resume' : run?.phase === 'approval' ? 'Awaiting approval' : 'Start run'}
+                <button className="start" disabled={busy} onClick={() => { setTab('feed'); void setRunning(true); }}>
+                  <Play size={14} fill="currentColor" /> {run?.phase === 'paused' ? 'Resume' : 'Start run'}
                 </button>
               )}
               </>
@@ -278,7 +285,7 @@ export default function WarRoom() {
             </>
           )}
           <button className={tab === 'feed' ? 'on' : ''} onClick={() => switchTab('feed')}>
-            <Activity size={14} /> Live feed
+            <Activity size={14} /> Live feed {run?.phase === 'approval' && <i className="tabAlert" aria-hidden />}
           </button>
           <button className={tab === 'score' ? 'on' : ''} onClick={() => switchTab('score')}>
             <Sparkles size={14} /> Scoreboard
@@ -287,6 +294,16 @@ export default function WarRoom() {
             <ListFilter size={14} /> Findings <span>{findings.length}</span>
           </button>
         </nav>
+        {run?.phase === 'approval' && (
+          <div className="approvalBanner" role="alert">
+            <AlertTriangle size={15} />
+            <span>Approval needed — the order-ownership fix is waiting on you</span>
+            <button onClick={() => {
+              switchTab('feed');
+              requestAnimationFrame(() => document.getElementById('approval-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+            }}>Review approval</button>
+          </div>
+        )}
         {tab === 'project' && project && <ProjectBattle filter={active} focus={focus} clearFilter={() => setActive('War room')} />}
         {tab === 'feed' && (
           <>
@@ -356,7 +373,7 @@ export default function WarRoom() {
                       </button>
                     )}
                     {m.approval && run?.phase === 'approval' && (
-                      <div className="approval">
+                      <div className="approval" id="approval-card">
                         <div>
                           <AlertTriangle size={18} />
                           <span>

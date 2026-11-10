@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Bot, Check, ChevronRight, Download, FileDown, FlaskConical, ShieldAlert, ShieldCheck, Wrench } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { type ProjectReport, type ReviewFinding, testCounts } from '../lib/project-review';
+import { type ProjectReport, type ProjectUpdate, type ReviewFinding, testCounts } from '../lib/project-review';
 import type { ReviewResult } from './project-review-session';
 
 const esc = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -95,6 +95,33 @@ function exportReport(report: ProjectReport, filename: string) {
   saveBlob(reportHtml(report, filename), 'text/html', filename.replace(/\.zip$/i, '') + '-hex-report.html');
 }
 
+// SWE-agent style trajectory: a readable .md with a fenced JSON block, assembled client-side from data on hand.
+function exportTrajectory(report: ProjectReport, updates: ProjectUpdate[], filename: string) {
+  const trajectory = {
+    filename,
+    exportedAt: new Date().toISOString(),
+    updates: updates.map(({ agent, squad, text }) => ({ agent, squad, text })),
+    findings: report.findings.map(({ title, file, line, status, severity, cwe, verification, detail }) => ({ title, file, line, status, severity, cwe, verification, detail })),
+    changes: report.changes,
+    tests: report.tests,
+    kept: report.kept,
+    aiCalls: report.aiCalls ?? 0,
+  };
+  const md = '# Hex review trajectory — ' + filename + '\n\n'
+    + '_' + trajectory.exportedAt + '_\n\n'
+    + '## Agent steps\n\n' + updates.map((u) => '- **' + u.agent + '** (' + u.squad + '): ' + u.text).join('\n')
+    + '\n\n## Findings\n\n' + report.findings.map((f) => '- ' + f.status + ' · ' + f.severity + ' · ' + f.title + ' (' + f.file + ':' + f.line + ')' + (f.verification ? ' — ' + f.verification : '')).join('\n')
+    + '\n\n## Applied changes\n\n' + (report.changes.length ? report.changes.map((c) => '### ' + c.file + ':' + c.line + '\n```diff\n' + (c.before ? '- ' + c.before + '\n' : '') + '+ ' + c.after.trim() + '\n```').join('\n\n') : '_None._')
+    + '\n\n## Tests\n\n- Baseline: ' + report.tests.baseline.summary + ' ' + testCounts(report.tests.baseline)
+    + '\n- Patched: ' + report.tests.patched.summary + ' ' + testCounts(report.tests.patched)
+    + '\n\n## Raw trajectory\n\n```json\n' + JSON.stringify(trajectory, null, 2) + '\n```\n';
+  saveBlob(md, 'text/markdown', filename.replace(/\.zip$/i, '') + '-hex-trajectory.md');
+}
+
+const provenLabel = 'Verified — generated exploit test';
+const verificationLabel = (verification: ReviewFinding['verification']) =>
+  verification === 'proven by generated exploit test' ? provenLabel : verification === 'test-verified' ? 'Tests pass after fix' : 'Compiles cleanly';
+
 // Plain-language risk for viewers who are not security specialists.
 const risk: Record<string, string> = {
   'CWE-89': 'User input is pasted straight into a database query, so an attacker can read or change other customers’ data.',
@@ -135,7 +162,7 @@ function Diff({ before, after }: { before: string; after: string }) {
   );
 }
 
-export function ProjectReviewResults({ review }: { review: ReviewResult }) {
+export function ProjectReviewResults({ review, updates = [] }: { review: ReviewResult; updates?: ProjectUpdate[] }) {
   const { report, archive, filename } = review;
   const fixed = report.findings.filter((item) => item.status === 'Patched').sort(bySeverity);
   const open = report.findings.filter((item) => item.status !== 'Patched').sort(bySeverity);
@@ -182,6 +209,9 @@ export function ProjectReviewResults({ review }: { review: ReviewResult }) {
           <button className="pr-report" onClick={() => exportReport(report, filename)}>
             <FileDown size={14} /> Export report
           </button>
+          <button className="pr-report" onClick={() => exportTrajectory(report, updates, filename)}>
+            <FileDown size={14} /> Export trajectory
+          </button>
         </div>
       </div>
 
@@ -208,7 +238,7 @@ export function ProjectReviewResults({ review }: { review: ReviewResult }) {
                 <span className={'sev ' + item.severity.toLowerCase()}>{item.severity}</span>
                 <b>{item.title}</b>
                 {item.cwe === 'Unclassified' && <span className="pr-tag"><Bot size={11} /> AI-written</span>}
-                <span className="pr-proof" title={item.verification}><Check size={12} />{item.verification === 'test-verified' ? 'Tests pass after fix' : 'Compiles cleanly'}</span>
+                <span className={'pr-proof' + (item.verification === 'proven by generated exploit test' ? ' proven' : '')} title={item.verification}><Check size={12} />{verificationLabel(item.verification)}</span>
               </div>
               <p><b>Risk:</b> {riskOf(item)}</p>
               <p><b>Fix:</b> {item.detail}</p>

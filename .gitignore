@@ -19,6 +19,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Extracted sample project (the tracked artifact is hex-sample-store.zip)
+hex-sample-store/
+
 # Media authoring stays outside this repository
 promo/
 *.mp4
@@ -26,3 +29,8 @@ promo/
 *.wav
 *.mp3
 .data/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+samples/**/out.tgz

@@ -6,16 +6,25 @@ import type { Msg } from '../agents';
 import type { Attack, Finding, LabRun, ProbeId, RunSummary } from '../lab-types';
 import { escalationSignal, explain } from './intelligence';
 import { chooseAction, craftPayload } from './agent-tools';
+import { providerName } from './llm';
 import { exposed, leakedOrder, probe, verified } from './target';
 
 const checks = [
-  { id: 'sql', agent: 'Injector', title: 'Unbounded customer lookup', severity: 'Critical' },
-  { id: 'ownership', agent: 'IDOR Runner', title: 'Cross-account order access', severity: 'High' },
-  { id: 'prompt', agent: 'Prompt Smuggler', title: 'Private refund code exposure', severity: 'High' },
+  { id: 'sql', agent: 'Injector', title: 'Unbounded customer lookup', severity: 'Critical', note: '', fix: 'bind query parameters' },
+  { id: 'ownership', agent: 'IDOR Runner', title: 'Cross-account order access', severity: 'High', note: '', fix: 'enforce per-account order ownership' },
+  { id: 'prompt', agent: 'Prompt Smuggler', title: 'Private refund code exposure', severity: 'High', note: '', fix: 'keep private codes out of the assistant context' },
+  { id: 'ssrf', agent: 'SSRF Hunter', title: 'Link preview reaches cloud metadata', severity: 'Critical',
+    note: ' The link-preview endpoint fetched the cloud metadata address and returned a synthetic access key.', fix: 'allow only public https destinations' },
+  { id: 'pollution', agent: 'Proto Polluter', title: 'Settings merge pollutes every object', severity: 'High',
+    note: ' A settings update with a __proto__ key made a different user\'s fresh session report isAdmin: true.', fix: 'skip __proto__, constructor and prototype keys when merging' },
+  { id: 'supply', agent: 'Supply Saboteur', title: 'Hijacked dependency release runs on install', severity: 'Critical',
+    note: ' Updating atlas-ui-kit to the hijacked 2.4.1 release ran its postinstall script, which read the synthetic npm publish token.', fix: 'install with --ignore-scripts and require the reviewed lockfile integrity' },
 ] as const;
+// Probes that need nothing from earlier findings run in this order after the SQL attempts.
+const modernChecks = checks.slice(3);
 
-// Hard ceiling on OpenAI calls per lab run. Beyond it, crafting and policy fall back to deterministic logic.
-const AI_BUDGET = 8;
+// Hard ceiling on AI provider calls per lab run. Beyond it, crafting and policy fall back to deterministic logic.
+const AI_BUDGET = 12;
 const GOAL_ATTEMPT = 'Goal: find one lookup value that makes the endpoint return a row belonging to the other tenant (bob), revealing a string-concatenation flaw in this synthetic fixture.';
 const GOAL_REATTACK = 'The endpoint now binds parameters. Goal: check whether any crafted value can still return the other tenant (bob). It should not.';
 // Textbook inputs against the two-row synthetic fixture; used offline and when the AI budget is spent.
@@ -229,6 +238,7 @@ export function advance(owner: string, id: string) {
       verifyFinding(run, 'sql');
       if (needsReattack(run)) reattackSql(run, localReattackPayloads, 'Local');
       verifyFinding(run, 'prompt');
+      for (const check of modernChecks) verifyFinding(run, check.id);
       if (run.findings.some((finding) => finding.id === 'ownership' && finding.state === 'Open')) {
         requestApproval(run);
       } else {
@@ -255,10 +265,10 @@ function executeProbe(run: LabRun, check: typeof checks[number], variant?: 'alte
   run.attempts += 1;
   if (exposed(check.id, before)) {
     run.detectMs.push(Number((performance.now() - sentAt).toFixed(3)));
-    run.findings.push({ ...check, before, variant, openedAt: Date.now(), state: 'Open' });
+    run.findings.push({ id: check.id, agent: check.agent, title: check.title, severity: check.severity, before, variant, openedAt: Date.now(), state: 'Open' });
     message(run, {
       agent: check.agent, squad: 'red', status: 'success', findingId: check.id,
-      text: check.title + ' confirmed from the target response.'
+      text: check.title + ' confirmed from the target response.' + check.note
         + (check.id === 'ownership' && order ? ' This probe used the order ID discovered by Injector.' : '')
         + (check.id === 'prompt' ? ' This is a deterministic fixture.' : ''),
     });
@@ -296,7 +306,7 @@ function agentCycle(owner: string, run: LabRun, fn: (currentTurn: () => LabRun |
     current.phase = 'failed';
     message(current, {
       agent: 'Director', squad: 'neutral', status: 'alert',
-      text: 'The agent turn failed. Check the server log and OpenAI configuration, then start a new run. Existing evidence is saved.',
+      text: 'The agent turn failed. Check the server log and AI provider configuration, then start a new run. Existing evidence is saved.',
     });
     save(owner, current);
   }).finally(() => {
@@ -316,7 +326,7 @@ async function craftSequence(startCalls: number, count: number, hardened: boolea
     if (startCalls + used < AI_BUDGET) {
       used++;
       const crafted = await craftPayload('/customers lookup', done.map((d) => ({ payload: d.payload, status: d.status, rows: d.names.length, names: d.names })), goal);
-      if (crafted) { payload = crafted.payload; why = crafted.rationale; source = 'OpenAI'; }
+      if (crafted) { payload = crafted.payload; why = crafted.rationale; source = providerName() ?? 'Local'; }
     }
     if (payload === undefined) { const f = fallback[i % fallback.length]; payload = f.payload; why = f.why; }
     const result = sendPayload(payload, hardened);
@@ -379,10 +389,9 @@ function advanceAgents(owner: string, run: LabRun) {
 
   // Red follow-ups are deterministic fixtures and need no model call.
   if (work.stage === 'red') {
-    if (!run.messages.some((m) => m.agent === 'Prompt Smuggler')) {
-      executeProbe(run, checks[2]);
-    } else if (order && !run.messages.some((m) => m.agent === 'IDOR Runner')) {
-      executeProbe(run, checks[1]);
+    const next = [checks[2], ...(order ? [checks[1]] : []), ...modernChecks].find((check) => !run.messages.some((m) => m.agent === check.agent));
+    if (next) {
+      executeProbe(run, next);
     } else {
       work.stage = 'blue';
       const room = Math.max(0, Math.min(2, AI_BUDGET - (run.aiCalls ?? 0)));
@@ -406,7 +415,7 @@ function advanceAgents(owner: string, run: LabRun) {
   const options = run.findings
     .filter((f) => f.state !== 'Verified' && !f.attacks?.some((a) => a.kind === 'reattack'))
     .flatMap(({ id, title }) => [
-      { action: 'fix_' + id, id, description: 'Apply the scoped runtime fix for ' + title },
+      { action: 'fix_' + id, id, description: 'Apply the scoped runtime fix for ' + title + ' (' + checks.find((check) => check.id === id)!.fix + ')' },
       ...(id === 'ownership' ? [] : [{ action: 'quarantine_' + id, id, description: 'Quarantine the entire route for ' + title + ', including normal traffic' }]),
     ])
     .filter(({ action }) => !work.decisions.some((d) => d.action === action));
@@ -453,8 +462,8 @@ function advanceAgents(owner: string, run: LabRun) {
     const current = currentTurn();
     if (!current?.agentWork) return;
     const selected = decision && options.find(({ action }) => action === decision.action);
-    if (!decision || !selected) throw new Error('OpenAI agent did not select an available tool');
-    applyBlue(current, selected.action, decision.reason, 'OpenAI');
+    if (!decision || !selected) throw new Error('AI agent did not select an available tool');
+    applyBlue(current, selected.action, decision.reason, providerName() ?? 'Local');
   });
 }
 
@@ -471,13 +480,13 @@ export function startRun(owner: string) {
   const run: LabRun = {
     id: randomUUID(), createdAt: Date.now(), phase: 'running', step: 0, nextAt: Date.now() + 800,
     approved: null, messages: [], findings: [], attempts: 0, detectMs: [], aiCalls: 0, sqlAttempts: [],
-    ...(process.env.OPENAI_API_KEY ? { agentWork: { stage: 'red' as const, decisions: [] } } : {}),
+    ...(providerName() ? { agentWork: { provider: providerName(), stage: 'red' as const, decisions: [] } } : {}),
   };
-  message(run, { agent: 'Scout', squad: 'red', text: 'Synthetic Atlas Commerce target scoped to customer lookup, order ownership and the refund assistant.' });
+  message(run, { agent: 'Scout', squad: 'red', text: 'Synthetic Atlas Commerce target scoped to customer lookup, order ownership, the refund assistant, link previews, settings sync and the dependency pipeline.' });
   message(run, {
     agent: 'Director', squad: 'neutral',
-    text: run.agentWork ? 'OpenAI agent mode. Red crafts probes, Blue selects policies, and Verifier checks the results.'
-      : 'Local practice mode. Add an OpenAI key and start a new run for agent-crafted probes and policies.',
+    text: run.agentWork ? run.agentWork.provider + ' agent mode. Red crafts probes, Blue selects policies, and Verifier checks the results.'
+      : 'Local practice mode. Add an OpenAI or Groq key and start a new run for agent-crafted probes and policies.',
   });
   save(owner, run);
   schedule(owner, run);

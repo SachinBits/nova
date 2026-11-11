@@ -18,13 +18,16 @@ Hex's central idea is that the conversation can carry that chain. Each agent con
 - **Injector:** examines query boundaries and attaches validation evidence.
 - **IDOR Runner:** evaluates object ownership boundaries.
 - **Prompt Smuggler:** evaluates model-facing instruction boundaries.
+- **SSRF Hunter:** tests whether server-side fetches can reach internal addresses.
+- **Proto Polluter:** tests object merges for prototype pollution.
+- **Supply Saboteur:** tests whether a hijacked dependency release can run code at install time.
 - **Sentinel:** watches traffic and logs for anomalous patterns.
 - **Patch Engineer:** drafts and applies allowlisted, reversible mitigations.
 - **Triage:** merges related alerts into a coherent incident.
 - **Containment:** requests human approval for disruptive actions.
 - **Director:** explains the exchange and tracks confirmed outcomes.
 
-The local execution architecture uses Next.js, a server scheduler, a private synthetic target, and SQLite history. OpenAI selects scoped probes and runtime policies when configured. Jev adds an advisory triage signal. Runtime policies are evaluated through before-and-after evidence.
+The local execution architecture uses Next.js, a server scheduler, a private synthetic target, and SQLite history. OpenAI or Groq selects scoped probes and runtime policies when configured. Jev adds an advisory triage signal. Runtime policies are evaluated through before-and-after evidence.
 
 ## Why the experience is different
 
@@ -36,7 +39,9 @@ The initial audience is security education, controlled exercises, and teams expl
 
 ## Submission implementation
 
-The implemented exercise runs SQL injection, order ownership, and an instruction-following fixture against synthetic data. It records measured findings and validates mitigations through attack replays and legitimate controls.
+The implemented exercise runs SQL injection, order ownership, an instruction-following fixture, SSRF, prototype pollution and a hijacked dependency release against synthetic data. It records measured findings and validates mitigations through attack replays and legitimate controls.
+
+Beyond the lab, Hex reviews real projects: uploaded ZIPs, pasted GitHub links, and every push to watched repositories. Reviews cover code, dependencies and CI workflows, apply fixes only when the project's tests confirm them in a Docker sandbox, and report each push's result back to GitHub as a commit status.
 
 ## One-line pitch
 

@@ -6,6 +6,7 @@ import type { ProjectUpdate } from '../lib/project-review';
 import { Avatar } from './agent-identity';
 import { ProjectReviewResults } from './project-review-results';
 import { useProjectReview } from './project-review-session';
+import { useChatFeed } from '../lib/use-chat-feed';
 
 const steps = [
   { label: 'Read the code', hint: 'Unpack the ZIP and parse each file', icon: FileSearch },
@@ -48,6 +49,8 @@ export function ProjectBattle({ filter, focus, clearFilter }: { filter: string; 
   const seenFocus = useRef(focus);
   const filtered = project?.updates.filter((update) => matchesFilter(update, filter)) ?? [];
   const logOpen = logChoice ?? (!done || filter !== 'War room');
+  // Only the entry animation is used here; the panel keeps its own follow-scroll.
+  const { enter } = useChatFeed(filtered.map((_, index) => String(index)), 'project|' + filter);
 
   useEffect(() => {
     if (!done && follow.current && panel.current) panel.current.scrollTop = panel.current.scrollHeight;
@@ -117,7 +120,7 @@ export function ProjectBattle({ filter, focus, clearFilter }: { filter: string; 
           <div role="log" aria-label="Agent activity">
             {filtered.length === 0 && <p className="pr-empty">No messages from {filter} in this review. Scout, Patch Engineer, Verifier and Director take part in project reviews.</p>}
             {filtered.map((update, index) => (
-              <div className={`message ${update.squad}`} key={index}>
+              <div className={`message ${update.squad}${enter(String(index)).className}`} style={enter(String(index)).style} key={index}>
                 <div className="rail"><Avatar name={update.agent} squad={update.squad} /></div>
                 <div className="bubble">
                   <div className="meta"><b>{update.agent}</b><span>{projectRoles[update.agent] ?? update.squad}</span></div>

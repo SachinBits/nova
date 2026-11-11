@@ -1,11 +1,31 @@
 # Hex architecture
 
-The Next.js Node runtime serves the React workspace and the same-origin arena API. The browser polls for snapshots. A server-side scheduler executes the run even when the tab closes, while the API can resume a due run after a server restart. SQLite stores each run, its decisions, and its evidence under the browser's session identifier. Keep the app on one process with persistent local disk.
+Hex is a single Next.js process on the Node runtime. It serves the React workspace and the same-origin APIs, runs background work in-process, and keeps state in SQLite on local disk. Run it as one process with a persistent `.data/` directory.
 
-- Scout selects a Red tool and payload using the shared evidence. Injector executes an actual SQLite query against fresh synthetic data. IDOR Runner can use the order ID from the lookup evidence. The assistant check runs against an intentionally vulnerable deterministic fixture.
-- Sentinel detects exposures using response assertions. OpenAI selects one strict function call per agent turn. Hex validates the action against the current lab state, executes it, and supplies the result as context for the next turn. Triage and Director can explain the results, and Jev can add an advisory escalation probability.
-- Patch Engineer selects candidate policies. The Verifier runs the exact attack and a legitimate control against the candidate. Broad quarantine fails the control and rolls back. Blue can use that result to select a narrower policy. Containment gates the order policy on an operator decision.
-- Verification compares the original exposure with the attack replay and a legitimate control. A candidate policy is retained as verified only if both assertions pass. Declining leaves the finding open. Every new exercise starts from the intentionally vulnerable baseline.
-- The exported receipt contains synthetic request and response evidence, outcomes, timestamps and a SHA-256 digest. The digest is an integrity checksum, with no signer identity.
+## Attack lab
 
-The private target is an in-process request handler scoped to this lab. Shared evidence and the scheduler coordinate agents inside one process.
+- A server-side scheduler advances each run even when the tab is closed, and the API resumes a due run after a restart. Runs are stored in SQLite under the browser's session cookie.
+- The target is an in-process handler with six fixtures: a SQLite customer lookup, order ownership, a refund assistant, a link preview backed by a simulated network, a settings merge whose prototype is sandboxed per request, and a dependency installer with a hijacked release. Nothing reaches a real network or the Hex process's own prototypes.
+- Red probes each boundary. In agent mode the model crafts SQL payloads and picks Blue's policies through one forced function call per turn, within a per-run budget; Hex validates every action against the current state before executing it.
+- The Verifier replays the attack and a legitimate control against each candidate policy. A policy is kept only if the replay is blocked and the control still succeeds, so broad quarantines roll back. Order ownership changes wait for operator approval.
+- The evidence receipt holds the synthetic requests, responses, decisions and a SHA-256 digest. The digest detects changes; it does not identify a signer.
+
+## Project review
+
+`lib/server/review.ts` runs the same pipeline for uploads, pasted GitHub links and pushes, one job at a time.
+
+1. Unpack the archive with path, size and entry limits; credential files are excluded but recorded.
+2. Scan JavaScript and TypeScript with the parse-tree rules in `project-rules.ts`, and the manifests, lockfiles and workflows with `supply-chain.ts`. Resolved dependency versions are checked against OSV.dev.
+3. Optionally ask the configured model for findings and single-location patches. Its findings are merged with the scanner's by file and vulnerability class.
+4. Run the project's tests in a network-disabled, read-only Docker container, apply the candidate fixes, and run them again. Fixes are kept only if the results are no worse; otherwise they are reverted.
+5. Optionally generate exploit tests for kept fixes and run them against the original and fixed code.
+
+## Live monitor
+
+`lib/server/live.ts` owns a queue of pushes in its own SQLite file. Pushes arrive from the signed webhook (`/api/github/webhook`) or from a poller that sends conditional requests for each watched branch head. Each push is reviewed, compared with the previous review of its branch, and reported as a commit status and comment. The War Room and `/live` poll `/api/live` for updates.
+
+`proxy.ts` keeps the app local: requests that arrive through a tunnel can reach only the webhook endpoint.
+
+## Model providers
+
+`lib/server/llm.ts` adapts every model call to either the OpenAI Responses API or Groq's Chat Completions API, including structured output and forced tool calls. Groq requests send less source per review to stay within its free-tier limits.

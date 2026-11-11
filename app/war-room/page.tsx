@@ -7,11 +7,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { agents, type Squad } from '../../lib/agents';
 import { Logo, Avatar, Stacked } from '../../components/agent-identity';
 import { useArena } from '../../lib/use-arena';
+import { useLive } from '../../lib/use-live';
+import { useChatFeed } from '../../lib/use-chat-feed';
+import { PushFeed } from '../../components/push-feed';
+import type { LivePushSummary } from '../../lib/live-types';
 import type { Evidence, Finding, LabRun } from '../../lib/lab-types';
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
   ArrowUp,
+  GitCommitHorizontal,
   Check,
   ChevronLeft,
   CircleStop,
@@ -32,7 +38,11 @@ export default function WarRoom() {
   const { project } = useProjectReview();
   const [dark, setDark] = useState(true);
   const [active, setActive] = useState('War room');
-  const [tab, setTab] = useState<'feed' | 'score' | 'findings' | 'project'>(project ? 'project' : 'feed');
+  const [tab, setTab] = useState<'feed' | 'score' | 'findings' | 'project' | 'push'>(project ? 'project' : 'feed');
+  const [pushId, setPushId] = useState<string>();
+  const [toast, setToast] = useState<LivePushSummary>();
+  const live = useLive();
+  const inPush = tab === 'push' && !!pushId;
   const [input, setInput] = useState('');
   const [focus, setFocus] = useState(0);
   const inProject = tab === 'project' && !!project;
@@ -50,11 +60,18 @@ export default function WarRoom() {
     setActive(name);
     setFocus((count) => count + 1);
     setMobileOpen(false);
-    if (!inProject) setTab('feed');
+    if (!inProject && !inPush) setTab('feed');
   }
-  function switchTab(next: 'feed' | 'score' | 'findings' | 'project') {
-    if ((next === 'project') !== (tab === 'project')) setActive('War room');
+  function switchTab(next: 'feed' | 'score' | 'findings' | 'project' | 'push') {
+    if ((next === 'project') !== (tab === 'project') || (next === 'push') !== (tab === 'push')) setActive('War room');
     setTab(next);
+  }
+  function openPush(id: string) {
+    setPushId(id);
+    setActive('War room');
+    setTab('push');
+    setToast(undefined);
+    setMobileOpen(false);
   }
   const [mobileOpen, setMobileOpen] = useState(false);
   const {
@@ -71,8 +88,6 @@ export default function WarRoom() {
   const [selectedFinding, setSelectedFinding] = useState<Finding['id'] | null>(null);
   const detail = findings.find((finding) => finding.id === selectedFinding);
   const end = useRef<HTMLDivElement>(null);
-  const feedRef = useRef<HTMLDivElement>(null);
-  const scrollPositions = useRef<Record<string, number>>({});
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -91,18 +106,19 @@ export default function WarRoom() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Follow the conversation only when the reader is already near its end.
+  // A new push takes over the screen when nothing else is in progress; otherwise it waits behind a notice.
   useEffect(() => {
-    const feed = feedRef.current;
-    if (feed && feed.scrollHeight - feed.scrollTop - feed.clientHeight < 220) {
-      feed.scrollTo({ top: feed.scrollHeight, behavior: 'smooth' });
-    }
-  }, [messages, typing]);
-
-  useEffect(() => {
-    const feed = feedRef.current;
-    if (feed) feed.scrollTop = scrollPositions.current[active] ?? feed.scrollHeight;
-  }, [active, tab]);
+    if (!live.arrival) return;
+    const { push } = live.arrival;
+    const watching = tab === 'push' && pushId && pushId !== push.id
+      && live.pushes.some((item) => item.id === pushId && (item.status === 'queued' || item.status === 'running'));
+    const labBusy = run?.phase === 'running' || run?.phase === 'approval';
+    const reviewBusy = tab === 'project' && !!project && !project.review && !project.error;
+    if (labBusy || reviewBusy || watching) setToast(push);
+    else if (pushId !== push.id || tab !== 'push') openPush(push.id);
+    // Only a new arrival should move the view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live.arrival]);
 
   const filtered = useMemo(() => {
     if (active === 'War room') return messages;
@@ -116,6 +132,8 @@ export default function WarRoom() {
       );
     return messages.filter((message) => message.agent === active);
   }, [active, messages]);
+
+  const chat = useChatFeed(filtered.map((message) => String(message.id)), (run?.id ?? '') + '|' + active + '|' + tab, typing);
 
   function send() {
     const directive = input.trim();
@@ -180,6 +198,22 @@ export default function WarRoom() {
             {n === 'War room' && running && !inProject && <i />}
           </button>
         ))}
+        <div className="section">GITHUB PUSHES</div>
+        {live.pushes.length === 0 ? (
+          <Link href="/live" className="thread pushEmpty">
+            <span>
+              <small>{live.config?.watching.length ? 'Watching ' + live.config.watching.join(', ') + '. New pushes appear here.' : 'Not watching any repository. Set it up in the live monitor.'}</small>
+            </span>
+          </Link>
+        ) : live.pushes.slice(0, 5).map((item) => (
+          <button key={item.id} className={`thread pushRow ${inPush && pushId === item.id ? 'selected' : ''}`} onClick={() => openPush(item.id)}>
+            <i className={'pushDot ' + item.status} aria-label={item.status} />
+            <span>
+              <b>{item.message || item.sha.slice(0, 7)}</b>
+              <small>{item.repo.split('/')[1]}@{item.branch} · {item.sha.slice(0, 7)} · {item.status}</small>
+            </span>
+          </button>
+        ))}
         <div className="section">{inProject ? 'AGENTS IN THIS REVIEW' : 'AGENTS'}</div>
         {inProject
           ? projectAgents.map(({ name, squad, count }) => (
@@ -233,12 +267,14 @@ export default function WarRoom() {
             <Logo compact />
           </button>
           <div>
-            <h1>{inProject ? 'Project review' : active}</h1>
+            <h1>{inPush ? (active === 'War room' ? 'GitHub push' : active) : inProject ? 'Project review' : active}</h1>
             <p>
-              {inProject
+              {inPush
+                ? (live.pushes.find((item) => item.id === pushId)?.repo ?? 'Live monitor') + ' · Push review'
+                : inProject
                 ? project?.filename
                 : active === 'War room'
-                  ? (run?.agentWork ? 'OpenAI agent mode · Practice lab with a synthetic store' : 'Practice lab with a synthetic store')
+                  ? (run?.agentWork ? (run.agentWork.provider ?? 'OpenAI') + ' agent mode · Practice lab with a synthetic store' : 'Practice lab with a synthetic store')
                   : active.includes('squad')
                     ? 'Squad channel · Practice lab'
                     : `${active} · Agent thread`}
@@ -248,7 +284,9 @@ export default function WarRoom() {
             <button className="icon" aria-label="Toggle theme" onClick={() => setDark(!dark)}>
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            {inProject ? (
+            {inPush ? (
+              <Link className="ghost" href={'/live?push=' + pushId}>Open in live monitor</Link>
+            ) : inProject ? (
               <button className="start" disabled={!project?.review} onClick={() => downloadArchive(project!.review!.archive, project!.review!.filename)}>
                 <Download size={14} /> Download fixed project
               </button>
@@ -276,6 +314,12 @@ export default function WarRoom() {
         </header>
         {error && <p className="arena-error" role="alert">{error}</p>}
         <nav className="tabs">
+          {pushId && (
+            <button className={tab === 'push' ? 'on' : ''} onClick={() => switchTab('push')}>
+              <GitCommitHorizontal size={14} /> GitHub push
+              {live.pushes.some((item) => item.id === pushId && (item.status === 'queued' || item.status === 'running')) && <i className="pushDot running" aria-hidden />}
+            </button>
+          )}
           {project && (
             <>
               <button className={tab === 'project' ? 'on' : ''} onClick={() => switchTab('project')}>
@@ -304,16 +348,16 @@ export default function WarRoom() {
             }}>Review approval</button>
           </div>
         )}
+        {tab === 'push' && pushId && (
+          <PushFeed
+            id={pushId}
+            filter={(agent, squad) => active === 'War room' || (active === 'Red squad' ? squad !== 'blue' : active === 'Blue squad' ? squad !== 'red' : agent === active)}
+          />
+        )}
         {tab === 'project' && project && <ProjectBattle filter={active} focus={focus} clearFilter={() => setActive('War room')} />}
         {tab === 'feed' && (
           <>
-            <div
-              className="feed"
-              ref={feedRef}
-              onScroll={(e) => {
-                scrollPositions.current[active] = e.currentTarget.scrollTop;
-              }}
-            >
+            <div className="feed" ref={chat.ref} onScroll={chat.onScroll}>
               {filtered.length === 0 && (
                 <div className="empty">
                   <div className="arena">
@@ -336,7 +380,8 @@ export default function WarRoom() {
               )}
               {filtered.map((m, i) => (
                 <div
-                  className={`message ${m.squad} ${i > 0 && filtered[i - 1].agent === m.agent ? 'continued' : ''}`}
+                  className={`message ${m.squad} ${i > 0 && filtered[i - 1].agent === m.agent ? 'continued' : ''}${chat.enter(String(m.id)).className}`}
+                  style={chat.enter(String(m.id)).style}
                   key={m.id}
                 >
                   <div className="rail">
@@ -396,7 +441,7 @@ export default function WarRoom() {
                 </div>
               ))}
               {typing && (
-                <div className="typing">
+                <div className="typing enter" key={typing}>
                   <Avatar
                     name={typing}
                     squad={
@@ -413,6 +458,9 @@ export default function WarRoom() {
               )}
               <div ref={end} />
             </div>
+            {chat.unread > 0 && (
+              <button className="jumpPill" onClick={chat.jump}><ArrowDown size={14} /> {chat.unread} new message{chat.unread === 1 ? '' : 's'}</button>
+            )}
             <div className="composer">
               <div>
                 <Sparkles size={16} />
@@ -435,6 +483,14 @@ export default function WarRoom() {
               <small>The Verifier checks tool results. Changes to order access require your approval.</small>
             </div>
           </>
+        )}
+        {toast && (
+          <div className="pushToast" role="status">
+            <GitCommitHorizontal size={16} />
+            <span><b>New push · {toast.repo.split('/')[1]}@{toast.branch}</b><small>{toast.message || toast.sha.slice(0, 7)}</small></span>
+            <button className="start" onClick={() => openPush(toast.id)}>Watch</button>
+            <button className="icon" aria-label="Dismiss" onClick={() => setToast(undefined)}><X size={15} /></button>
+          </div>
         )}
         {tab === 'score' && <Score stats={stats} phase={run?.phase} />}
         {tab === 'findings' && (

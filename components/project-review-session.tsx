@@ -10,15 +10,23 @@ type ProjectRun = {
   review?: ReviewResult;
   error?: string;
 };
+// A review starts from an uploaded ZIP or from a public GitHub repository link.
+export type ReviewInput = { file: File } | { repo: string };
 const ReviewContext = createContext<{
   project: ProjectRun | null;
-  startReview: (file: File, useAI: boolean) => void;
+  startReview: (input: ReviewInput, useAI: boolean) => void;
 } | null>(null);
 
-async function receiveReview(file: File, useAI: boolean, emit: (event: ProjectReviewEvent) => void) {
-  const response = await fetch('/api/project-review?stream=1' + (useAI ? '&ai=1' : ''), {
-    method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file,
-  });
+// A readable, filesystem-safe name for a repository link, used for the header and downloads.
+function repoName(link: string) {
+  const path = link.trim().replace(/^https?:\/\//i, '').replace(/^(www\.)?github\.com\//i, '').replace(/\.git$/i, '').replace(/\/(tree|commit)\//, '@');
+  return path.replace(/[^\w.@-]+/g, '-').replace(/^-+|-+$/g, '') || 'github-repo';
+}
+
+async function receiveReview(input: ReviewInput, useAI: boolean, emit: (event: ProjectReviewEvent) => void) {
+  const response = await fetch('/api/project-review?stream=1' + (useAI ? '&ai=1' : ''), 'file' in input
+    ? { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: input.file }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo: input.repo }) });
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     throw new Error(data?.error || 'The project review failed.');
@@ -51,15 +59,16 @@ export function ProjectReviewSession({ children }: { children: ReactNode }) {
   const [project, setProject] = useState<ProjectRun | null>(null);
   const running = useRef(false);
 
-  function startReview(file: File, useAI: boolean) {
+  function startReview(input: ReviewInput, useAI: boolean) {
     if (running.current) return;
     running.current = true;
-    setProject({ filename: file.name, updates: [] });
-    void receiveReview(file, useAI, (event) => {
+    const filename = 'file' in input ? input.file.name : repoName(input.repo);
+    setProject({ filename, updates: [] });
+    void receiveReview(input, useAI, (event) => {
       setProject((current) => {
         if (!current) return current;
         if (event.type === 'update') return { ...current, updates: [...current.updates, event.update] };
-        if (event.type === 'complete') return { ...current, review: { filename: file.name, ...event.result } };
+        if (event.type === 'complete') return { ...current, review: { filename, ...event.result } };
         return current;
       });
     }).catch((failure: unknown) => {

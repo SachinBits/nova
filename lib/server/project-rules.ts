@@ -35,6 +35,16 @@ function contains(node: ts.Node, test: (item: ts.Node) => boolean): boolean {
   return test(node) || !!ts.forEachChild(node, (child) => contains(child, test) || undefined);
 }
 
+// Request-controlled data: Express/Koa req.*, and Next.js/Fetch searchParams.
+function fromRequest(node: ts.Node) {
+  return contains(node, (item) => (ts.isPropertyAccessExpression(item) && ts.isIdentifier(item.expression)
+    && /^(req|request|ctx)$/.test(item.expression.text) && /^(query|body|params|headers|cookies|url|originalUrl)$/.test(item.name.text))
+    || (ts.isPropertyAccessExpression(item) && item.name.text === 'searchParams'));
+}
+
+const aiModules = /^(openai|groq-sdk|@anthropic-ai\/sdk|ai|@ai-sdk\/.+|@google\/gen(erative-)?ai|langchain|@langchain\/.+|ollama|cohere-ai|@mistralai\/.+)$/;
+const modelOutput = /\b(choices|output_text|completion|tool_?calls?|toolCall|llm\w*|aiResponse|modelOutput|generated\w*|answer)\b/i;
+
 function moduleBindings(tree: ts.SourceFile) {
   const bound = new Map<string, { module: string; name: string }>();
   for (const statement of tree.statements) {
@@ -95,6 +105,8 @@ function inspect(path: string, source: string, suggestFix: boolean) {
   const usesDollar = modules.has('pg');
   const usesQuestion = ['mysql', 'mysql2', 'mysql2/promise', 'sqlite3', 'better-sqlite3', 'node:sqlite'].some((name) => modules.has(name));
   const placeholder = usesDollar === usesQuestion ? undefined : usesDollar ? '$' as const : '?' as const;
+  const usesAI = [...modules].some((name) => aiModules.test(name));
+  const usesMongo = modules.has('mongoose') || modules.has('mongodb');
   function report(node: ts.Node, title: string, detail: string, severity: ReviewFinding['severity'], cwe: string, status: ReviewFinding['status'] = 'Review') {
     findings.push({ file: path, line: tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1, title, detail, status, severity, cwe });
   }
@@ -150,6 +162,47 @@ function inspect(path: string, source: string, suggestFix: boolean) {
       const fn = node.expression;
       if (ts.isIdentifier(fn) && fn.text === 'eval') report(node, 'Dynamic code execution', 'Review whether untrusted input can reach eval().', 'High', 'CWE-95');
       const arg = node.arguments[0];
+      const callee = ts.isIdentifier(fn) ? fn.text : ts.isPropertyAccessExpression(fn) ? fn.name.text : '';
+      const target = resolved(fn);
+      // SSRF: the server fetches a URL the client chose (cloud metadata, internal admin panels).
+      if (arg && fromRequest(arg) && ((ts.isIdentifier(fn) && fn.text === 'fetch')
+          || (target && /^(axios|got|node-fetch|undici|superagent|needle|(node:)?https?)$/.test(target.module) && /^(\*|default|get|post|put|request|fetch)$/.test(target.name === '*' ? '*' : target.name))
+          || (ts.isPropertyAccessExpression(fn) && ts.isIdentifier(fn.expression) && /^(axios|got|http|https)$/.test(fn.expression.text)))) {
+        report(node, 'Server-side request forgery (SSRF)', 'The server requests a URL taken from the client. Allowlist hosts and block private and metadata addresses.', 'High', 'CWE-918');
+      }
+      if (callee === 'redirect' && node.arguments.some((item) => fromRequest(item))) {
+        report(node, 'Open redirect', 'The redirect target comes from the request. Allow only relative paths or known hosts.', 'Medium', 'CWE-601');
+      }
+      if (target && /^(lodash|lodash\.\w+|lodash-es)$/.test(target.module) && /^(merge|mergeWith|defaultsDeep|set|setWith|zipObjectDeep)$/.test(target.name === '*' ? callee : target.name)
+          && node.arguments.some((item) => fromRequest(item))) {
+        report(node, 'Prototype pollution', 'Request data is deep-merged into an object, so a __proto__ key can change every object in the process.', 'High', 'CWE-1321');
+      }
+      // Model-style receivers (User.findOne) count even when the model is imported from another file.
+      const modelCall = ts.isPropertyAccessExpression(fn) && ts.isIdentifier(fn.expression) && /^[A-Z]/.test(fn.expression.text);
+      if ((usesMongo || modelCall) && /^(find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|countDocuments|where)$/.test(callee) && arg
+          && ((ts.isPropertyAccessExpression(arg) && fromRequest(arg) && /^(body|query|params)$/.test(arg.name.text))
+            || (ts.isObjectLiteralExpression(arg) && arg.properties.some((prop) => ts.isPropertyAssignment(prop) && ts.isPropertyAccessExpression(prop.initializer) && fromRequest(prop.initializer))))) {
+        report(node, 'NoSQL injection', 'Request values reach a MongoDB filter unchanged, so an object such as {"$ne": null} bypasses the check. Cast values with String() or validate them.', 'High', 'CWE-943');
+      }
+      if (target?.module === 'node-serialize' && /^(unserialize|\*)$/.test(target.name)) {
+        report(node, 'Unsafe deserialization', 'node-serialize executes functions embedded in the payload. Use JSON.parse.', 'Critical', 'CWE-502');
+      }
+      if (target && /^(node:)?vm$/.test(target.module) && /^(runInNewContext|runInThisContext|runInContext|compileFunction|Script)$/.test(target.name === '*' ? callee : target.name) && arg && !ts.isStringLiteralLike(arg)) {
+        report(node, 'Code execution in node:vm', 'node:vm is not a security sandbox; code can escape to the host process.', 'High', 'CWE-94');
+      }
+      if (target?.module === 'jsonwebtoken' && /^(sign|verify)$/.test(target.name === '*' ? callee : target.name) && node.arguments[1] && ts.isStringLiteralLike(node.arguments[1])) {
+        report(node.arguments[1], 'Hardcoded JWT secret', 'Anyone with the source can mint valid tokens. Load the signing key from the environment.', 'High', 'CWE-798');
+      }
+      if (/^(insertAdjacentHTML|write|writeln)$/.test(callee) && ts.isPropertyAccessExpression(fn)
+          && (callee === 'insertAdjacentHTML' || (ts.isIdentifier(fn.expression) && fn.expression.text === 'document'))) {
+        const html = callee === 'insertAdjacentHTML' ? node.arguments[1] : arg;
+        if (html && !ts.isStringLiteralLike(html)) report(node, 'DOM XSS sink', 'Dynamic HTML is written into the page. Use textContent or sanitize with DOMPurify.', 'Medium', 'CWE-79');
+      }
+      // Model output treated as trusted code or markup (OWASP LLM05: improper output handling).
+      if (usesAI && (callee === 'eval' || /^exec(Sync)?$/.test(callee) || /^(runInNewContext|runInThisContext)$/.test(callee))
+          && node.arguments.some((item) => modelOutput.test(item.getText(tree)))) {
+        report(node, 'LLM output executed as code', 'A model response reaches a code or shell sink. Prompt injection can turn this into remote code execution. Never execute model output; map it to an allowlist of actions.', 'Critical', 'CWE-94');
+      }
       if (ts.isPropertyAccessExpression(fn) && /^(query|execute|prepare)$/.test(fn.name.text)
           && arg && ts.isTemplateExpression(arg) && /\b(select|insert|update|delete)\b/i.test(arg.head.text)) {
         const member = node.parent;
@@ -198,6 +251,60 @@ function inspect(path: string, source: string, suggestFix: boolean) {
         report(node, 'Dynamic code execution', 'A string passed to ' + fn.text + ' runs as code. Pass a function instead.', 'High', 'CWE-95');
       }
     }
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'RegExp' && node.arguments?.[0] && fromRequest(node.arguments[0])) {
+      report(node, 'Regular expression from user input', 'A client-supplied pattern can trigger catastrophic backtracking (ReDoS) and stall the event loop. Escape the input or use a fixed pattern.', 'Medium', 'CWE-1333');
+    }
+    if ((ts.isForInStatement(node) || ts.isForOfStatement(node))
+        && ts.isVariableDeclarationList(node.initializer) && ts.isIdentifier(node.initializer.declarations[0]?.name)) {
+      const key = (node.initializer.declarations[0].name as ts.Identifier).text;
+      // A for-of only pollutes when it walks a path: cur = cur[key] descends into nested objects.
+      const descends = contains(node.statement, (item) => ts.isBinaryExpression(item) && item.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        && ts.isIdentifier(item.left) && ts.isElementAccessExpression(item.right) && ts.isIdentifier(item.right.expression)
+        && item.right.expression.text === item.left.text && ts.isIdentifier(item.right.argumentExpression) && item.right.argumentExpression.text === key);
+      let owner: ts.Node | undefined = node.parent;
+      while (owner && !ts.isFunctionLike(owner)) owner = owner.parent;
+      const assignsByKey = contains(node.statement, (item) => ts.isBinaryExpression(item) && item.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        && ts.isElementAccessExpression(item.left) && ts.isIdentifier(item.left.argumentExpression) && item.left.argumentExpression.text === key);
+      const guarded = owner && /__proto__|hasOwn|Object\.create\(null\)|new Map/.test(owner.getText(tree));
+      const name = owner && 'name' in owner && owner.name && ts.isIdentifier(owner.name as ts.Node) ? (owner.name as ts.Identifier).text : '';
+      const recursive = !!name && contains(node.statement, (item) => ts.isCallExpression(item) && ts.isIdentifier(item.expression) && item.expression.text === name);
+      if (assignsByKey && !guarded && (ts.isForOfStatement(node) ? descends : recursive || /merge|extend|assign|clone|deep|set|defaults/i.test(name))) {
+        if (suggestFix && ts.isBlock(node.statement)) {
+          const at = node.statement.getStart(tree) + 1;
+          edits.push({ start: at, end: at, text: ' if (' + key + " === '__proto__' || " + key + " === 'constructor' || " + key + " === 'prototype') continue;" });
+          report(node, 'Prototype pollution', 'Added a guard that skips __proto__, constructor and prototype keys.', 'High', 'CWE-1321', 'Patched');
+        } else {
+          report(node, 'Prototype pollution', 'Keys from input are copied without blocking __proto__, constructor and prototype.', 'High', 'CWE-1321');
+        }
+      }
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(node.left)
+        && /^(innerHTML|outerHTML)$/.test(node.left.name.text) && !ts.isStringLiteralLike(node.right)) {
+      if (usesAI && modelOutput.test(node.right.getText(tree))) {
+        report(node, 'LLM output rendered as HTML', 'A model response is inserted as HTML; prompt injection can plant script in the page. Render it as text or sanitize it.', 'High', 'CWE-79');
+      } else {
+        report(node, 'DOM XSS sink', 'Dynamic HTML is assigned to ' + node.left.name.text + '. Use textContent or sanitize with DOMPurify.', 'Medium', 'CWE-79');
+      }
+    }
+    // Build-time public env vars are inlined into the client bundle.
+    if (ts.isPropertyAccessExpression(node) && /^(NEXT_PUBLIC|VITE|REACT_APP|EXPO_PUBLIC|PUBLIC)_\w*(SECRET|PRIVATE|PASSWORD|SERVICE_ROLE|TOKEN)/i.test(node.name.text)
+        && /(process\.env|import\.meta\.env)$/.test(node.expression.getText(tree))) {
+      report(node, 'Server secret exposed to the browser', node.name.text + ' is inlined into the client bundle at build time, so every visitor can read it. Keep secrets in server-only variables.', 'High', 'CWE-200');
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      const prop = (name: string) => node.properties.find((item): item is ts.PropertyAssignment => ts.isPropertyAssignment(item) && nameOf(item.name) === name);
+      const role = prop('role');
+      const content = prop('content');
+      if (role && literal(role.initializer, 'system') && content && fromRequest(content.initializer)) {
+        report(content, 'User input in system prompt', 'Request data is written into the system prompt, so users can rewrite the model\'s instructions (prompt injection). Pass user text only in user messages.', 'High', 'CWE-1427');
+      }
+      for (const name of ['system', 'instructions', 'systemInstruction']) {
+        const item = prop(name);
+        if (usesAI && item && fromRequest(item.initializer)) {
+          report(item, 'User input in system prompt', 'Request data is written into the model instructions, so users can rewrite them (prompt injection). Pass user text only in user messages.', 'High', 'CWE-1427');
+        }
+      }
+    }
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
       report(node, 'Dynamic code execution', 'new Function() compiles strings into code. Review whether untrusted input can reach it.', 'High', 'CWE-95');
     }
@@ -212,11 +319,14 @@ function inspect(path: string, source: string, suggestFix: boolean) {
         report(node, 'JWT accepts the none algorithm', "Remove 'none' from the algorithms list.", 'High', 'CWE-347');
       }
       if (name === 'dangerouslySetInnerHTML') report(node, 'Raw HTML rendering', 'Sanitize this HTML or render it as text.', 'Medium', 'CWE-79');
+      if (name === 'httpOnly' && node.initializer.kind === ts.SyntaxKind.FalseKeyword) {
+        report(node, 'Session cookie readable by scripts', 'httpOnly: false lets any XSS steal the cookie. Set httpOnly: true.', 'Medium', 'CWE-1004');
+      }
     }
     if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'dangerouslySetInnerHTML') report(node, 'Raw HTML rendering', 'Sanitize this HTML or render it as text.', 'Medium', 'CWE-79');
     if (ts.isStringLiteralLike(node)) {
       const target = assignedTo(node.parent, node);
-      if ((node.text.length >= 8 && target && /pass(word)?|secret|api_?key|token/i.test(target)) || /\b(?:sk-[\w-]{16,}|AKIA[A-Z0-9]{16}|gh[pousr]_\w{20,})\b/.test(node.text)) {
+      if ((node.text.length >= 8 && target && /pass(word)?|secret|api_?key|token/i.test(target)) || /\b(?:sk-[\w-]{16,}|sk-ant-[\w-]{20,}|gsk_\w{20,}|AKIA[A-Z0-9]{16}|gh[pousr]_\w{20,}|github_pat_\w{20,}|glpat-[\w-]{20}|xox[abp]-[\w-]{10,}|sk_live_\w{16,}|AIza[\w-]{35})\b/.test(node.text)) {
         report(node, 'Hardcoded secret', 'A credential-like value is stored in source. Move it to a secret store. The value is omitted from this report.', 'High', 'CWE-798');
       }
     }
@@ -244,7 +354,7 @@ export function parses(path: string, source: string) {
   return !diagnostics.some(({ category }) => category === ts.DiagnosticCategory.Error);
 }
 
-export function reviewSources(files: Map<string, Buffer>) {
+export function reviewSources(files: Map<string, Buffer>, aiCharLimit = 24000) {
   const patched = new Map(files);
   const findings: ReviewFinding[] = [];
   const aiSources: { file: string; source: string }[] = [];
@@ -258,7 +368,8 @@ export function reviewSources(files: Map<string, Buffer>) {
     try { source = textDecoder.decode(bytes); } catch { continue; }
     scannedFiles++;
     // The AST scanner and auto-fix only understand JS/TS; other languages are AI-review only.
-    if (sourceName.test(path)) {
+    // Minified and vendored bundles are third-party code; their advisories come from the dependency audit.
+    if (sourceName.test(path) && !/\.min\.[cm]?js$|(^|\/)vendor\//i.test(path)) {
       const result = inspect(path, source, true);
       if (result.patched !== source) {
         if (!parses(path, result.patched)) {
@@ -274,8 +385,8 @@ export function reviewSources(files: Map<string, Buffer>) {
       }
       findings.push(...result.findings);
     }
-    if (aiSources.length < 8 && source.length <= 7000 && aiChars + source.length <= 24000
-        && !/\b(?:sk-[\w-]{16,}|AKIA[A-Z0-9]{16}|gh[pousr]_[\w]{20,}|BEGIN [A-Z ]*PRIVATE KEY)\b/.test(source)) {
+    if (aiSources.length < 8 && source.length <= 7000 && aiChars + source.length <= aiCharLimit
+        && !/\b(?:sk-[\w-]{16,}|gsk_\w{20,}|github_pat_\w{20,}|AKIA[A-Z0-9]{16}|gh[pousr]_[\w]{20,}|BEGIN [A-Z ]*PRIVATE KEY)\b/.test(source)) {
       aiSources.push({ file: path, source });
       aiChars += source.length;
     }

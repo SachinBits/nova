@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { ScanSearch, Wrench, ShieldCheck, Swords, FileCode2, Play } from 'lucide-react';
+import { ScanSearch, Wrench, ShieldCheck, Swords, FileCode2, Play, GitBranch, Radio } from 'lucide-react';
 import { Logo } from '../components/agent-identity';
 import { useProjectReview } from '../components/project-review-session';
 import { uploadLimit } from '../lib/project-review';
@@ -18,6 +18,7 @@ export default function Landing() {
   const router = useRouter();
   const { project, startReview } = useProjectReview();
   const [file, setFile] = useState<File>();
+  const [repo, setRepo] = useState('');
   const [useAI, setUseAI] = useState(false);
   const busy = !!project && !project.review && !project.error;
   const [error, setError] = useState('');
@@ -28,7 +29,19 @@ export default function Landing() {
       setError('Choose a ZIP up to 12 MB.');
       return;
     }
-    startReview(chosen, useAI);
+    startReview({ file: chosen }, useAI);
+    router.push('/war-room');
+  }
+
+  function reviewRepo() {
+    const link = repo.trim();
+    if (!link || busy) return;
+    if (!/^(https?:\/\/)?(www\.)?github\.com\/[\w.-]+\/[\w.-]+|^[\w.-]+\/[\w.-]+$/i.test(link)) {
+      setError('Enter a GitHub repository link such as https://github.com/owner/repo.');
+      return;
+    }
+    setError('');
+    startReview({ repo: link }, useAI);
     router.push('/war-room');
   }
 
@@ -59,6 +72,7 @@ export default function Landing() {
       <header>
         <Logo />
         <div className="headActions">
+          <Link className="ghost" href="/live">Live monitor</Link>
           <Link className="ghost" href="/war-room">Open the war room</Link>
         </div>
       </header>
@@ -83,7 +97,7 @@ export default function Landing() {
           <section className="landing-card" aria-labelledby="review-heading">
             <div className="landing-cardIcon red"><FileCode2 size={18} /></div>
             <h2 id="review-heading">Review your project</h2>
-            <p>Upload a project ZIP for a broad security review, and follow Red and Blue as they work. JavaScript, TypeScript and Python are fixed and verified; other languages are flagged.</p>
+            <p>Upload a project ZIP or paste a GitHub link for a broad security review, and follow Red and Blue as they work. JavaScript, TypeScript and Python are fixed and verified; other languages are flagged.</p>
             <form onSubmit={review} aria-busy={busy}>
               <fieldset disabled={busy}>
                 <label htmlFor="project-zip">Project ZIP</label>
@@ -93,9 +107,20 @@ export default function Landing() {
                     setError('');
                   }} />
                 <p id="project-zip-help">Up to 12 MB. Credential files and dependencies are excluded.</p>
+                <label htmlFor="project-repo">Or a GitHub repository</label>
+                <div className="landing-repo">
+                  <input id="project-repo" type="text" inputMode="url" spellCheck={false} autoComplete="off"
+                    placeholder="https://github.com/owner/repo" value={repo} aria-describedby="project-repo-help"
+                    onChange={(event) => { setRepo(event.target.value); setError(''); }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); reviewRepo(); } }} />
+                  <button type="button" className="ghost" disabled={!repo.trim() || busy} onClick={reviewRepo}>
+                    <GitBranch size={14} /> Review repo
+                  </button>
+                </div>
+                <p id="project-repo-help">Public repositories, or private ones with GITHUB_TOKEN set. Add /tree/branch to pick a branch.</p>
                 <label className="review-opt-in">
                   <input type="checkbox" checked={useAI} onChange={(event) => setUseAI(event.target.checked)} />
-                  Send selected source files to OpenAI for advisory review
+                  Send selected source files to the configured AI provider (OpenAI or Groq) for advisory review
                 </label>
                 <div className="landing-actions">
                   <button className="start" disabled={!file || busy}>{busy ? 'Reviewing…' : 'Review project'}</button>
@@ -112,11 +137,20 @@ export default function Landing() {
           <section className="landing-card" aria-labelledby="lab-heading">
             <div className="landing-cardIcon blue"><Swords size={18} /></div>
             <h2 id="lab-heading">Watch a live attack lab</h2>
-            <p>No upload needed. Watch Red craft attacks and Blue verify fixes against a synthetic store, with you in control of the risky change.</p>
+            <p>No upload needed. Watch Red run SQL injection, IDOR, prompt injection, SSRF, prototype pollution and a hijacked npm release against a synthetic store, while Blue verifies each fix. You stay in control of the risky change.</p>
             <div className="landing-actions">
               <button className="start" onClick={() => router.push('/war-room?start=1')}>
                 <Play size={14} fill="currentColor" /> Start a lab run
               </button>
+            </div>
+          </section>
+
+          <section className="landing-card" aria-labelledby="live-heading">
+            <div className="landing-cardIcon blue"><Radio size={18} /></div>
+            <h2 id="live-heading">Review every push</h2>
+            <p>Hex watches your GitHub repositories, reviews each new commit, flags what that push introduced or fixed, and posts a pass or fail status on the commit.</p>
+            <div className="landing-actions">
+              <Link className="start" href="/live"><Radio size={14} /> Open the live monitor</Link>
             </div>
           </section>
         </div>

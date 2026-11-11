@@ -5,8 +5,8 @@ export type Msg = {
   squad: Squad;
   text: string;
   time: string;
-  findingId?: 'sql' | 'ownership' | 'prompt';
-  source?: 'OpenAI' | 'Local';
+  findingId?: 'sql' | 'ownership' | 'prompt' | 'ssrf' | 'pollution' | 'supply';
+  source?: 'OpenAI' | 'Groq' | 'Local';
   status?: 'blocked' | 'success' | 'alert';
   approval?: boolean;
 };
@@ -15,6 +15,9 @@ export const agents = [
   ['Injector', 'red'],
   ['IDOR Runner', 'red'],
   ['Prompt Smuggler', 'red'],
+  ['SSRF Hunter', 'red'],
+  ['Proto Polluter', 'red'],
+  ['Supply Saboteur', 'red'],
   ['Sentinel', 'blue'],
   ['Patch Engineer', 'blue'],
   ['Triage', 'blue'],

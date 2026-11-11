@@ -27,7 +27,8 @@ const start = await api(undefined, 'start');
 assert.ok(start.agentWork, 'agent mode should be active with a key');
 
 const waiting = await waitFor(start.id, 'approval');
-assert.ok(waiting.aiCalls <= 8, 'AI calls per run must stay within budget: ' + waiting.aiCalls);
+assert.ok(waiting.aiCalls <= 12, 'AI calls per run must stay within budget: ' + waiting.aiCalls);
+assert.equal(waiting.findings.length, 6, 'all six probes confirm an exposure');
 const sql = waiting.findings.find(({ id }) => id === 'sql');
 assert.equal(sql.state, 'Verified', 'the scoped SQL fix should survive the re-attack');
 assert.ok(sql.payload, 'the SQL finding records the payload that worked');
@@ -45,7 +46,7 @@ assert.ok(waiting.messages.some(({ agent, status }) => agent === 'Verifier' && s
 
 await api(start.id, 'approve');
 const done = await waitFor(start.id, 'complete');
-assert.ok(done.aiCalls <= 8, 'AI calls still within budget after approval: ' + done.aiCalls);
+assert.ok(done.aiCalls <= 12, 'AI calls still within budget after approval: ' + done.aiCalls);
 assert.ok(done.findings.every(({ state }) => state === 'Verified'), 'every finding is verified after approval');
 assert.equal(done.findings.find(({ id }) => id === 'ownership').replay.status, 404);
 

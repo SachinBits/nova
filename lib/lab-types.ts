@@ -1,6 +1,6 @@
 import type { Msg } from './agents';
 
-export type ProbeId = 'sql' | 'ownership' | 'prompt';
+export type ProbeId = 'sql' | 'ownership' | 'prompt' | 'ssrf' | 'pollution' | 'supply';
 export type Evidence = {
   request: string;
   status: number;
@@ -11,7 +11,7 @@ export type Attack = {
   kind: 'attempt' | 'reattack';
   payload: string;
   rationale: string;
-  source: 'OpenAI' | 'Local';
+  source: 'OpenAI' | 'Groq' | 'Local';
   status: number;
   rows: number;
   names: string[];
@@ -36,7 +36,7 @@ export type Finding = {
 };
 export type AgentDecision = { action: string; reason: string; agent: string; time: string };
 export type LabRun = {
-  agentWork?: { stage: 'red' | 'blue'; decisions: AgentDecision[]; craft?: 'attempt' | 'reattack' };
+  agentWork?: { provider?: 'OpenAI' | 'Groq'; stage: 'red' | 'blue'; decisions: AgentDecision[]; craft?: 'attempt' | 'reattack' };
   sqlAttempts?: Attack[];
   aiCalls?: number;
   approvalRequestedAt?: number;

@@ -60,9 +60,16 @@ await api({ id, action: 'resume' });
 
 const approval = await waitForApproval(id);
 // 1 SQL attempt (first payload leaks) + ownership + prompt + 2 SQL re-attacks after the fix.
-assert.equal(approval.attempts, 5);
-assert.equal(approval.findings.length, 3);
-assert.equal(approval.findings.filter((item) => item.state === 'Verified').length, 2);
+assert.equal(approval.attempts, 8);
+assert.equal(approval.findings.length, 6);
+assert.equal(approval.findings.filter((item) => item.state === 'Verified').length, 5);
+for (const id of ['ssrf', 'pollution', 'supply']) {
+  const finding = approval.findings.find((item) => item.id === id);
+  assert.equal(finding.state, 'Verified', id + ' should verify');
+  assert.equal(finding.control.status, 200, id + ' control should pass');
+}
+assert.match(approval.findings.find((item) => item.id === 'supply').before.response.exfiltrated, /NPM_TOKEN/);
+assert.equal(approval.findings.find((item) => item.id === 'pollution').before.response.otherUserIsAdmin, true);
 const sqlFinding = approval.findings.find((item) => item.id === 'sql');
 assert.equal(sqlFinding.state, 'Verified');
 assert.equal(sqlFinding.attacks.filter((a) => a.kind === 'reattack').length, 2);

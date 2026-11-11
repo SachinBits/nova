@@ -20,9 +20,8 @@ async function pack(sampleDir, zipName, prefix) {
   zip.end();
   const bytes = await collected;
   mkdirSync(join(root, 'public'), { recursive: true });
-  writeFileSync(join(root, zipName), bytes);
   writeFileSync(join(root, 'public', zipName), bytes);
-  console.log('Packed ' + names.length + ' files into ' + zipName + ' and public/' + zipName + '.');
+  console.log('Packed ' + names.length + ' files into public/' + zipName + '.');
 }
 
 // The JS/TS sample is wrapped in a named directory; the Python sample is flat so imports resolve.

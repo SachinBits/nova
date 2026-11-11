@@ -30,4 +30,5 @@ export type ProjectReport = {
   kept: 'Deterministic + AI' | 'AI only' | 'Deterministic only' | 'None';
   tsChecked: number;
   aiCalls?: number;
+  source?: { repo: string; ref?: string; commit?: string };
 };

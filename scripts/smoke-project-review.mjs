@@ -35,7 +35,7 @@ async function unpack(archive) {
   return files;
 }
 
-const input = await readFile(new URL('../hex-sample-store.zip', import.meta.url));
+const input = await readFile(new URL('../public/hex-sample-store.zip', import.meta.url));
 const response = await submit(input);
 const { report, archive, error } = await response.json();
 assert.equal(response.status, 200, error);

@@ -23,7 +23,8 @@ function excluded(name: string) {
   );
 }
 
-export async function unpackProject(input: Buffer) {
+// skipLinks drops symbolic links (common in Git repositories) instead of rejecting the whole archive.
+export async function unpackProject(input: Buffer, { skipLinks = false } = {}) {
   const zip = await new Promise<ZipFile>((resolve, reject) => {
     fromBuffer(input, { lazyEntries: true, strictFileNames: true }, (error, result) => {
       if (error) reject(new UploadError('Upload a valid ZIP archive.'));
@@ -34,6 +35,7 @@ export async function unpackProject(input: Buffer) {
   const seen = new Map<string, { path: string; directory: boolean }>();
   let total = 0;
   let excludedFiles = 0;
+  const excludedPaths: string[] = [];
 
   function register(path: string, directory: boolean) {
     const key = path.normalize('NFC').toLowerCase();
@@ -48,6 +50,7 @@ export async function unpackProject(input: Buffer) {
     const path = safeName(entry);
     const directory = entry.fileName.endsWith('/');
     const mode = (entry.externalFileAttributes >>> 16) & 0xf000;
+    if (mode === 0xa000 && skipLinks) { excludedFiles++; return; }
     if (mode !== 0 && mode !== 0x8000 && mode !== 0x4000) {
       throw new UploadError('ZIP links and special files are unsupported.');
     }
@@ -55,7 +58,7 @@ export async function unpackProject(input: Buffer) {
     for (let i = 1; i < parts.length; i++) register(parts.slice(0, i).join('/'), true);
     register(path, directory);
     if (directory) return;
-    if (excluded(path)) { excludedFiles++; return; }
+    if (excluded(path)) { excludedFiles++; if (excludedPaths.length < 200) excludedPaths.push(path); return; }
     total += entry.uncompressedSize;
     if (entry.uncompressedSize > 8 * 1024 * 1024 || total > expandedLimit) {
       throw new UploadError('The expanded ZIP exceeds the size limit.');
@@ -74,7 +77,7 @@ export async function unpackProject(input: Buffer) {
       zip.on('entry', (entry) => void read(entry).then(() => zip.readEntry(), reject));
       zip.readEntry();
     });
-    return { files, excludedFiles };
+    return { files, excludedFiles, excludedPaths };
   } catch (error) {
     if (error instanceof UploadError) throw error;
     throw new UploadError('The ZIP contains an unreadable or unsupported entry.');

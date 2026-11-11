@@ -95,7 +95,7 @@ function exportReport(report: ProjectReport, filename: string) {
   saveBlob(reportHtml(report, filename), 'text/html', filename.replace(/\.zip$/i, '') + '-hex-report.html');
 }
 
-// SWE-agent style trajectory: a readable .md with a fenced JSON block, assembled client-side from data on hand.
+// Review log export: a readable .md with a fenced JSON block, assembled client-side.
 function exportTrajectory(report: ProjectReport, updates: ProjectUpdate[], filename: string) {
   const trajectory = {
     filename,

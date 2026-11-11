@@ -10,6 +10,10 @@ import {
   ShieldCheck,
   Sparkles,
   Wrench,
+  Globe,
+  Biohazard,
+  PackageX,
+  GitCommitHorizontal,
 } from 'lucide-react';
 import { agents, type Squad } from '../lib/agents';
 
@@ -44,6 +48,10 @@ const glyphs: Record<string, React.ElementType> = {
   Injector: Crosshair,
   'IDOR Runner': KeyRound,
   'Prompt Smuggler': MessageSquareWarning,
+  'SSRF Hunter': Globe,
+  'Proto Polluter': Biohazard,
+  'Supply Saboteur': PackageX,
+  GitHub: GitCommitHorizontal,
   Sentinel: Radar,
   'Patch Engineer': Wrench,
   Triage: GitMerge,

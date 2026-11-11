@@ -21,8 +21,10 @@ globalThis.fetch = async (url, init) => {
     const payload = crafted === 1 ? "' OR 1=1 --" : "' OR " + crafted + " = " + crafted + " --";
     return Response.json({ output: [{ type: 'function_call', name: 'craft_payload', arguments: JSON.stringify({ payload, rationale: 'mock ' + crafted }) }] });
   }
-  const action = labChoices.shift();
-  assert.ok(body.tools[0].parameters.properties.action.enum.includes(action), 'Action missing: ' + action);
+  const offered = body.tools[0].parameters.properties.action.enum;
+  // Scripted picks first, then the first scoped fix on offer.
+  const action = labChoices.shift() ?? offered.find((name) => name.startsWith('fix_'));
+  assert.ok(offered.includes(action), 'Action missing: ' + action);
   return Response.json({
     output: [{ type: 'function_call', name: 'lab_action', arguments: JSON.stringify({ action, reason: 'Mock selected ' + action }) }],
   });

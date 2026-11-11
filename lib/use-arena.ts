@@ -91,7 +91,7 @@ export function useArena() {
     typing: run?.phase === 'running'
       ? run.agentWork
         ? (run.agentWork.stage === 'red' ? 'Scout' : 'Patch Engineer')
-        : ['Injector', 'IDOR Runner', 'Prompt Smuggler', 'Triage', 'Patch Engineer'][run.step]
+        : ['Injector', 'IDOR Runner', 'Prompt Smuggler', 'SSRF Hunter', 'Proto Polluter', 'Supply Saboteur', 'Triage', 'Patch Engineer'][run.step]
       : '',
     stats: {
       attacks: run?.attempts ?? 0,

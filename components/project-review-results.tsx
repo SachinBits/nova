@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertTriangle, Bot, Check, ChevronRight, Download, FileDown, FlaskConical, ShieldAlert, ShieldCheck, Wrench } from 'lucide-react';
+import { TournamentResults } from './tournament-results';
 import type { ReactNode } from 'react';
 import { type ProjectReport, type ProjectUpdate, type ReviewFinding, testCounts } from '../lib/project-review';
 import type { ReviewResult } from './project-review-session';
@@ -164,6 +165,7 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 export function ProjectReviewResults({ review, updates = [] }: { review: ReviewResult; updates?: ProjectUpdate[] }) {
   const { report, archive, filename } = review;
+  if (report.tournament) return <TournamentResults evidence={report.tournament} filename={filename} initial={review.requirements} />;
   const fixed = report.findings.filter((item) => item.status === 'Patched').sort(bySeverity);
   const open = report.findings.filter((item) => item.status !== 'Patched').sort(bySeverity);
   const { baseline: b, patched: p } = report.tests;

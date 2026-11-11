@@ -1,3 +1,5 @@
+import type { Tournament } from './tournament';
+
 export const uploadLimit = 12 * 1024 * 1024;
 export type ProjectUpdate = { squad: 'red' | 'blue' | 'neutral'; agent: string; text: string };
 export type ProjectReviewResult = { report: ProjectReport; archive: string };
@@ -30,5 +32,6 @@ export type ProjectReport = {
   kept: 'Deterministic + AI' | 'AI only' | 'Deterministic only' | 'None';
   tsChecked: number;
   aiCalls?: number;
+  tournament?: Tournament;
   source?: { repo: string; ref?: string; commit?: string };
 };

@@ -10,7 +10,7 @@ export type LivePush = {
   message: string;
   author: string;
   compare?: string;
-  trigger: 'webhook' | 'poll' | 'manual';
+  trigger: 'webhook' | 'poll' | 'manual' | 'continuous';
   receivedAt: number;
   startedAt?: number;
   finishedAt?: number;
@@ -34,6 +34,8 @@ export type LivePush = {
 export type LivePushSummary = Omit<LivePush, 'report'> & { hasReport: boolean };
 export type LiveConfig = {
   watching: string[];
+  continuous: boolean;
+  recheckSeconds: number;
   pollSeconds: number;
   lastPoll?: number;
   pollError?: string;

@@ -82,7 +82,7 @@ function PushDetail({ push }: { push: LivePushSummary }) {
         {push.githubStatus && <><dt>GitHub status</dt><dd>{push.githubStatus}</dd></>}
         {push.githubComment && <><dt>Commit comment</dt><dd>{push.githubComment}</dd></>}
         {summary?.ai && <><dt>AI review</dt><dd>{summary.ai}</dd></>}
-        <dt>Trigger</dt><dd>{push.trigger === 'poll' ? 'Poller' : push.trigger === 'webhook' ? 'Webhook' : 'Manual'}</dd>
+        <dt>Trigger</dt><dd>{push.trigger === 'poll' ? 'Poller' : push.trigger === 'webhook' ? 'Webhook' : push.trigger === 'continuous' ? 'Scheduled recheck' : 'Manual'}</dd>
         {push.startedAt && push.finishedAt && <><dt>Duration</dt><dd>{((push.finishedAt - push.startedAt) / 1000).toFixed(1)}s</dd></>}
       </dl>
       {push.hasReport && !full && (
@@ -130,15 +130,19 @@ export default function LivePage() {
     return () => clearInterval(timer);
   }, [load]);
 
-  async function checkNow() {
+  async function checkNow(continuous?: boolean) {
     setChecking(true);
     try {
-      const response = await fetch('/api/live', { method: 'POST' });
+      const response = await fetch('/api/live', { method: 'POST', ...(continuous === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ continuous }) }) });
       if (response.ok) {
         const data = await response.json() as { config: LiveConfig; pushes: LivePushSummary[] };
         setConfig(data.config);
         setPushes(data.pushes);
+      } else {
+        setError('The monitor could not complete this request.');
       }
+    } catch {
+      setError('The monitor could not be reached.');
     } finally {
       setChecking(false);
     }
@@ -163,7 +167,7 @@ export default function LivePage() {
         <section className="landing-card live-config" aria-labelledby="live-config-heading">
           <div className="live-configHead">
             <h2 id="live-config-heading">Monitor</h2>
-            <button className="ghost" disabled={checking || !config?.watching.length} onClick={checkNow}>
+            <button className="ghost" disabled={checking || !config?.watching.length} onClick={() => void checkNow()}>
               <RefreshCw size={14} className={checking ? 'live-spin' : ''} /> {checking ? 'Checking…' : 'Check for pushes now'}
             </button>
           </div>
@@ -171,8 +175,16 @@ export default function LivePage() {
             <dl className="live-facts">
               <dt>Watching</dt>
               <dd>{config.watching.length ? config.watching.join(', ') : <>Nothing yet. Add <code>HEX_WATCH_REPOS=owner/repo</code> to <code>.env</code> and restart.</>}</dd>
+              <dt>Continuous checks</dt>
+              <dd>
+                <button type="button" className="ghost" role="switch" aria-label="Continuous checks"
+                  aria-checked={config.continuous} disabled={checking} onClick={() => void checkNow(!config.continuous)}>
+                  {config.continuous ? 'On' : 'Off'}
+                </button>
+                {' '}{config.continuous ? 'Reviews current commits every ' + config.recheckSeconds + 's while Hex runs.' : 'Runs on signed pushes or when you check manually.'}
+              </dd>
               <dt>Poller</dt>
-              <dd>{config.watching.length ? 'Every ' + config.pollSeconds + 's · last check ' + ago(config.lastPoll) : 'Off'}{config.pollError && <span className="live-warn"> · {config.pollError}</span>}</dd>
+              <dd>{config.continuous && config.watching.length ? 'Every ' + config.pollSeconds + 's · last check ' + ago(config.lastPoll) : 'Off'}{config.pollError && <span className="live-warn"> · {config.pollError}</span>}</dd>
               <dt>Webhook</dt>
               <dd>
                 <Webhook size={13} /> <code>{origin}/api/github/webhook</code> · {config.webhook ? 'secret configured' : <span className="live-warn">set GITHUB_WEBHOOK_SECRET to enable</span>}

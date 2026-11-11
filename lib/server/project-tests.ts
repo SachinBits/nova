@@ -99,7 +99,7 @@ function tapCount(stdout: string, label: 'pass' | 'fail') {
   return Number([...stdout.matchAll(new RegExp('^# ' + label + ' (\\d+)\\s*$', 'gm'))].at(-1)?.[1] ?? 0);
 }
 
-async function runContainer(files: Map<string, Buffer>, runtime: Runtime, rootDir: string, mode: string): Promise<{ stdout: string; ok: boolean }> {
+async function runContainer(files: Map<string, Buffer>, runtime: Runtime, rootDir: string, mode: string, verifier?: { code: string; args: string[] }): Promise<{ stdout: string; ok: boolean }> {
   const prefix = rootDir ? rootDir + '/' : '';
   const folder = await mkdtemp(join(tmpdir(), 'hex-review-'));
   const name = 'hex-review-' + randomUUID();
@@ -116,7 +116,9 @@ async function runContainer(files: Map<string, Buffer>, runtime: Runtime, rootDi
       '--memory=384m', '--cpus=1', '--pids-limit=64', '--tmpfs=/tmp:rw,noexec,nosuid,size=32m',
       '--mount', 'type=bind,source=' + folder + ',target=/review,readonly', '--workdir', '/review/' + prefix,
     ];
-    const command = runtime.kind === 'python'
+    const command = verifier
+      ? [...base, '--entrypoint=python', runtime.image, '-I', '-B', '-c', verifier.code, ...verifier.args]
+      : runtime.kind === 'python'
       ? [...base, '--env', 'HEX_TEST_DIR=/review/' + prefix, '--env', 'PYTHONPYCACHEPREFIX=/tmp/pyc', '--env', 'PYTHONDONTWRITEBYTECODE=1', '--entrypoint=python', runtime.image, '-c', pythonRunner, '--', mode]
       : [...base, '--entrypoint=node', runtime.image, '-e', nodeRunner, '--', mode];
     try {
@@ -163,6 +165,12 @@ export async function isolatedTests(files: Map<string, Buffer>, rootDir: string,
     : (ok ? 'Docker syntax checks passed for ' + checked + ' JS file(s). ' + (pass ? pass + ' Node test(s) completed.' : 'No compatible Node tests ran.')
           : 'Docker syntax checks passed. Project tests failed or exceeded the sandbox limits.');
   return { syntaxOk: true, jsChecked: checked, pass, fail, summary };
+}
+
+export async function verifyPythonProject(files: Map<string, Buffer>, runtime: Runtime, code: string, args: string[]) {
+  const { stdout, ok } = await runContainer(files, runtime, '', 'verifier', { code, args });
+  if (!ok) throw new Error('Verification did not complete.');
+  return JSON.parse(stdout.trim()) as { checks: Record<string, boolean>; assetPolicy: string };
 }
 
 // Validate a single Python patch by compiling just that file in the python image (no execution).

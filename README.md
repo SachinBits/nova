@@ -60,7 +60,19 @@ What a review checks:
 
 Fixes are applied only where they are safe to automate (bound SQL parameters, prototype-pollution guards, framework headers). Each fix is kept only if the project's own tests pass at least as well as before. Hex never installs uploaded dependencies or starts uploaded services. Everything else is reported with its file, line and remediation.
 
+## Field Supply patch tournament
+
+Choose **Try Field Supply tournament** on the home page, or upload the Field Supply storefront ZIP. The tournament requires a local `python:3.12-slim` image. Select the behavior you want to preserve before running it.
+
+The War Room reports 20 predefined assertions per version. It compares the original storefront, a broad no-store policy, a policy scoped to cart and order pages, and a deliberately broken checkout control. Hex supplies the assertions separately from the source under review. The security assertions are mandatory. Checkout and asset caching can be toggled after the run, and verdicts are recalculated from the recorded results.
+
+A qualifying candidate can be downloaded with its diff, selected requirements, candidate verdicts, and rerun instructions. Export evidence stays in the running Hex process for up to an hour, subject to a limit of 16 stored tournaments.
+
 ## Live monitor
+
+The **Continuous checks** switch is saved in SQLite. **On** watches the configured GitHub repositories and periodically rechecks unchanged branch heads while the Hex server runs. Set `HEX_RECHECK_SECONDS` to adjust the recheck interval. **Off** leaves signed push webhooks and **Check for pushes now** available. A running review can finish after switching off.
+
+Scheduled reviews use source and dependency checks, predefined Docker verification, and supported deterministic fixes. Their reviewed ZIPs appear in Live Monitor.
 
 Open **Live monitor** (`/live`), or stay in the War Room: new pushes appear in the sidebar, and when the room is idle the agents start reviewing the push straight away.
 

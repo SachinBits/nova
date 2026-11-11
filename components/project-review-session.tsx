@@ -1,9 +1,10 @@
 'use client';
 
 import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
+import type { Requirement } from '../lib/tournament';
 import type { ProjectReviewEvent, ProjectReviewResult, ProjectUpdate } from '../lib/project-review';
 
-export type ReviewResult = ProjectReviewResult & { filename: string };
+export type ReviewResult = ProjectReviewResult & { filename: string; requirements?: Requirement[] };
 type ProjectRun = {
   filename: string;
   updates: ProjectUpdate[];
@@ -14,7 +15,7 @@ type ProjectRun = {
 export type ReviewInput = { file: File } | { repo: string };
 const ReviewContext = createContext<{
   project: ProjectRun | null;
-  startReview: (input: ReviewInput, useAI: boolean) => void;
+  startReview: (input: ReviewInput, useAI: boolean, requirements?: Requirement[]) => void;
 } | null>(null);
 
 // A readable, filesystem-safe name for a repository link, used for the header and downloads.
@@ -59,7 +60,7 @@ export function ProjectReviewSession({ children }: { children: ReactNode }) {
   const [project, setProject] = useState<ProjectRun | null>(null);
   const running = useRef(false);
 
-  function startReview(input: ReviewInput, useAI: boolean) {
+  function startReview(input: ReviewInput, useAI: boolean, requirements?: Requirement[]) {
     if (running.current) return;
     running.current = true;
     const filename = 'file' in input ? input.file.name : repoName(input.repo);
@@ -68,7 +69,7 @@ export function ProjectReviewSession({ children }: { children: ReactNode }) {
       setProject((current) => {
         if (!current) return current;
         if (event.type === 'update') return { ...current, updates: [...current.updates, event.update] };
-        if (event.type === 'complete') return { ...current, review: { filename, ...event.result } };
+        if (event.type === 'complete') return { ...current, review: { filename, ...event.result, requirements } };
         return current;
       });
     }).catch((failure: unknown) => {

@@ -6,6 +6,7 @@ import { identifyProject, parses, reviewSources, sourceName } from './project-ru
 import { dockerReady, isolatedTests, pyCompile, pythonReady, type Runtime } from './project-tests';
 import { downloadRepo, type RepoRef, unwrapArchive } from './github';
 import { aiEnabled, aiLimits, providerName } from './llm';
+import { exportCandidate, runTournament } from './tournament';
 import { supplyChainReview } from './supply-chain';
 
 // The review pipeline shared by ZIP uploads, pasted GitHub links and push-triggered reviews.
@@ -95,7 +96,7 @@ async function loadProject(source: ReviewSource, emit: (update: ProjectUpdate) =
   return { files, excludedFiles: unpacked.excludedFiles, excludedPaths, origin: { repo: source.repo.owner + '/' + source.repo.repo, ref: source.repo.ref, commit } };
 }
 
-export async function runReview(source: ReviewSource, ai: boolean, emit: (update: ProjectUpdate) => void) {
+export async function runReview(source: ReviewSource, ai: boolean, emit: (update: ProjectUpdate) => void, generatedChecks = true) {
   emit({ squad: 'neutral', agent: 'Director', text: (source.kind === 'zip' ? 'Receiving the project ZIP' : 'Preparing the GitHub review') + ' and checking Docker availability.' });
   const nodeId = await dockerReady();
   const { files, excludedFiles, excludedPaths, origin } = await loadProject(source, emit);
@@ -115,6 +116,15 @@ export async function runReview(source: ReviewSource, ai: boolean, emit: (update
     ai: 'Off. Source stayed in Hex.', tests: { baseline: notRun, patched: notRun }, kept: 'None', tsChecked: 0,
     ...(origin ? { source: origin } : {}),
   };
+  if (runtime?.kind === 'python') {
+    const tournament = await runTournament(files, runtime, emit);
+    if (tournament) {
+      report.tournament = tournament;
+      const archive = await exportCandidate(tournament.id, 'scoped', ['checkout', 'assets'])
+        ?? await packProject(files, JSON.stringify(tournament, null, 2) + '\n');
+      return { report, archive: archive.toString('base64') };
+    }
+  }
   let aiPatches: AiPatch[] = [];
   // Beyond the findings call, at most one retry and one exploit-test call per review: a hard cap of 3.
   const budget: Budget = { calls: 0, max: 3 };
@@ -258,7 +268,7 @@ export async function runReview(source: ReviewSource, ai: boolean, emit: (update
     report.tests.patched = { ...baseline, summary: baseline.summary + ' No source edits were applied.' };
     emit({ squad: 'blue', agent: 'Patch Engineer', text: 'No supported automatic fixes were found. Review findings are in the report.' });
   }
-  if (ai && aiEnabled() && report.kept !== 'None') {
+  if (generatedChecks && ai && aiEnabled() && report.kept !== 'None') {
     await povPass(report, files, output, runtime, budget, emit);
   }
   report.aiCalls = budget.calls;

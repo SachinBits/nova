@@ -6,10 +6,11 @@ import { useState, type FormEvent } from 'react';
 import { ScanSearch, Wrench, ShieldCheck, Swords, FileCode2, Play, GitBranch, Radio } from 'lucide-react';
 import { Logo } from '../components/agent-identity';
 import { useProjectReview } from '../components/project-review-session';
+import { requirements, type Requirement } from '../lib/tournament';
 import { uploadLimit } from '../lib/project-review';
 
 const steps = [
-  { icon: ScanSearch, label: 'Find', hint: 'Red agents probe your code for real security flaws.' },
+  { icon: ScanSearch, label: 'Find', hint: 'Red reviews your code for security issues.' },
   { icon: Wrench, label: 'Fix', hint: 'Blue agents rewrite only what they can change safely.' },
   { icon: ShieldCheck, label: 'Prove', hint: 'A referee re-runs your tests in a locked-down sandbox.' },
 ];
@@ -20,6 +21,7 @@ export default function Landing() {
   const [file, setFile] = useState<File>();
   const [repo, setRepo] = useState('');
   const [useAI, setUseAI] = useState(false);
+  const [selected, setSelected] = useState<Requirement[]>(['checkout', 'assets']);
   const busy = !!project && !project.review && !project.error;
   const [error, setError] = useState('');
   const [loadingSample, setLoadingSample] = useState(false);
@@ -29,7 +31,7 @@ export default function Landing() {
       setError('Choose a ZIP up to 12 MB.');
       return;
     }
-    startReview({ file: chosen }, useAI);
+    startReview({ file: chosen }, useAI, selected);
     router.push('/war-room');
   }
 
@@ -41,7 +43,7 @@ export default function Landing() {
       return;
     }
     setError('');
-    startReview({ repo: link }, useAI);
+    startReview({ repo: link }, useAI, selected);
     router.push('/war-room');
   }
 
@@ -52,15 +54,15 @@ export default function Landing() {
     begin(file);
   }
 
-  async function trySample() {
+  async function trySample(filename: string) {
     if (busy || loadingSample) return;
     setError('');
     setLoadingSample(true);
     try {
-      const response = await fetch('/hex-sample-store.zip');
+      const response = await fetch('/' + filename);
       if (!response.ok) throw new Error('fetch failed');
       const blob = await response.blob();
-      begin(new File([blob], 'hex-sample-store.zip', { type: 'application/zip' }));
+      begin(new File([blob], filename, { type: 'application/zip' }));
     } catch {
       setError('The sample project could not be loaded. Run npm run sample, then retry.');
       setLoadingSample(false);
@@ -122,11 +124,20 @@ export default function Landing() {
                   <input type="checkbox" checked={useAI} onChange={(event) => setUseAI(event.target.checked)} />
                   Send selected source files to the configured AI provider (OpenAI or Groq) for advisory review
                 </label>
+                <fieldset>
+                  <legend>Field Supply requirements</legend>
+                  {(Object.keys(requirements) as Requirement[]).map((key) => (
+                    <label className="review-opt-in" key={key}><input type="checkbox" checked={selected.includes(key)} onChange={(event) => {
+                      setSelected(event.target.checked ? [...selected, key] : selected.filter((item) => item !== key));
+                    }} /> {requirements[key]}</label>
+                  ))}
+                </fieldset>
                 <div className="landing-actions">
                   <button className="start" disabled={!file || busy}>{busy ? 'Reviewing…' : 'Review project'}</button>
-                  <button type="button" className="ghost" disabled={busy || loadingSample} onClick={trySample}>
+                  <button type="button" className="ghost" disabled={busy || loadingSample} onClick={() => void trySample('hex-sample-store.zip')}>
                     {loadingSample ? 'Loading sample…' : 'Try the sample project'}
                   </button>
+                  <button type="button" className="ghost" disabled={busy || loadingSample} onClick={() => void trySample('field-supply-tournament.zip')}>Try Field Supply tournament</button>
                 </div>
               </fieldset>
             </form>

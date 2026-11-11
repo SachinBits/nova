@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { getPush, liveConfig, pollOnce, pushArchive, recentPushes, startLive } from '../../../lib/server/live';
+import { getPush, liveConfig, pollOnce, pushArchive, recentPushes, setContinuous, startLive } from '../../../lib/server/live';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +23,8 @@ export async function POST(request: NextRequest) {
   if (fetchSite ? fetchSite !== 'same-origin' : origin !== expectedOrigin) {
     return NextResponse.json({ error: 'Origin not allowed.' }, { status: 403 });
   }
-  startLive();
-  await pollOnce();
+  const input = await request.json().catch(() => null);
+  if (typeof input?.continuous === 'boolean') setContinuous(input.continuous);
+  else { startLive(); await pollOnce(true); }
   return NextResponse.json({ config: liveConfig(), pushes: recentPushes() });
 }
